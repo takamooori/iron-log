@@ -16,14 +16,18 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0d0d14; color: #e8e8f0; font-family: 'Noto Sans JP', sans-serif; min-height: 100vh; }
     #root { max-width: 480px; margin: 0 auto; }
+    #loading { display:flex; align-items:center; justify-content:center; height:100vh; color:#e8a020; font-family:'Bebas Neue',sans-serif; font-size:2rem; letter-spacing:4px; }
   </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><div id="loading">IRON LOG</div></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Recharts (依存: prop-types) -->
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 
   <script>
 const { useState, useEffect, useRef } = React;
@@ -59,9 +63,9 @@ function ExerciseInput({value,onChange}){
     open&&suggestions.length>0&&React.createElement("ul",{className:"suggest-list"},
       suggestions.map(s=>React.createElement("li",{key:s,className:"suggest-item",
         onMouseDown:()=>{onChange(s);setOpen(false)}},
-        usedExercises.includes(s)?[React.createElement("span",{key:"b",className:"suggest-badge"},"履歴"),s]:s
-      ))
-    )
+        usedExercises.includes(s)
+          ?[React.createElement("span",{key:"b",className:"suggest-badge"},"履歴"),s]
+          :s)))
   );
 }
 
@@ -77,10 +81,12 @@ function RecordForm({onSave}){
     if(!exercise)return;
     const validSets=rows.filter(r=>parseFloat(r.weight)>0&&parseInt(r.reps)>0);
     if(validSets.length===0)return;
-    const record={id:Date.now(),date:new Date().toISOString(),exercise,
+    const record={
+      id:Date.now(),date:new Date().toISOString(),exercise,
       sets:validSets.map((r,i)=>({setNum:i+1,weight:parseFloat(r.weight),reps:parseInt(r.reps),total:parseFloat(r.weight)*parseInt(r.reps)})),
       weight:Math.max(...validSets.map(r=>parseFloat(r.weight))),
-      total:validSets.reduce((s,r)=>s+parseFloat(r.weight)*parseInt(r.reps),0)};
+      total:validSets.reduce((s,r)=>s+parseFloat(r.weight)*parseInt(r.reps),0)
+    };
     const all=loadData();all.push(record);saveData(all);onSave();
     setSaved(true);setExercise("");setRows([{weight:"",reps:""}]);
     setTimeout(()=>setSaved(false),1800);
@@ -93,13 +99,13 @@ function RecordForm({onSave}){
       React.createElement("label",{className:"field-label"},"種目"),
       React.createElement(ExerciseInput,{value:exercise,onChange:setExercise})),
     React.createElement("div",{className:"set-header-row"},
-      React.createElement("span",{className:"set-num-col"}),
+      React.createElement("span",null),
       React.createElement("span",{className:"set-col-label"},"重量 kg"),
       React.createElement("span",{className:"set-col-label"},"レップス 回"),
       React.createElement("span",{className:"set-col-label set-subtotal-label"},"小計 kg"),
       React.createElement("span",{style:{width:28}})),
     rows.map((row,i)=>{
-      const sub=parseFloat(row.weight)>0&&parseInt(row.reps)>0?(parseFloat(row.weight)*parseInt(row.reps)).toFixed(0):"—";
+      const sub=(parseFloat(row.weight)>0&&parseInt(row.reps)>0)?(parseFloat(row.weight)*parseInt(row.reps)).toFixed(0):"—";
       return React.createElement("div",{key:i,className:"set-row"},
         React.createElement("span",{className:"set-num"},i+1),
         React.createElement("input",{className:"field-input set-input",type:"number",min:"0",step:"0.5",placeholder:"60",value:row.weight,onChange:e=>updateRow(i,"weight",e.target.value)}),
@@ -110,8 +116,11 @@ function RecordForm({onSave}){
     React.createElement("button",{className:"add-set-btn",onClick:addRow},"＋ セットを追加"),
     React.createElement("div",{className:"total-bar"},
       React.createElement("span",{className:"total-label"},"総重量合計"),
-      React.createElement("span",{className:"total-value"},grandTotal>0?grandTotal.toFixed(0):"—",React.createElement("span",{className:"unit"}," kg"))),
-    React.createElement("button",{className:`save-btn${saved?" saved":""}`,onClick:handleSave},saved?"✓ 保存完了！":"保存する")
+      React.createElement("span",{className:"total-value"},
+        grandTotal>0?grandTotal.toFixed(0):"—",
+        React.createElement("span",{className:"unit"}," kg"))),
+    React.createElement("button",{className:"save-btn"+(saved?" saved":""),onClick:handleSave},
+      saved?"✓ 保存完了！":"保存する")
   );
 }
 
@@ -131,13 +140,13 @@ function History({data,onDelete}){
           return React.createElement("div",{key:r.id,className:"history-card"},
             React.createElement("div",{className:"hc-top"},
               React.createElement("span",{className:"hc-exercise"},r.exercise),
-              React.createElement("span",{className:"hc-total-val"},r.total.toFixed(0)," kg"),
+              React.createElement("span",{className:"hc-total-val"},r.total.toFixed(0)+" kg"),
               React.createElement("button",{className:"del-btn",onClick:()=>onDelete(r.id)},"✕")),
             React.createElement("div",{className:"hc-sets"},
               setsArr.map(s=>React.createElement("div",{key:s.setNum,className:"hc-set-row"},
-                React.createElement("span",{className:"hc-set-num"},"Set ",s.setNum),
-                React.createElement("span",{className:"hc-set-detail"},`${s.weight}kg × ${s.reps}回`),
-                React.createElement("span",{className:"hc-set-sub"},s.total.toFixed(0)," kg")))));
+                React.createElement("span",{className:"hc-set-num"},"Set "+s.setNum),
+                React.createElement("span",{className:"hc-set-detail"},s.weight+"kg × "+s.reps+"回"),
+                React.createElement("span",{className:"hc-set-sub"},s.total.toFixed(0)+" kg")))));
         }))));
 }
 
@@ -149,28 +158,32 @@ function Charts({data}){
     React.createElement("div",{className:"empty-icon"},"📈"),
     React.createElement("p",{className:"empty-text"},"データがありません"),
     React.createElement("p",{className:"empty-sub"},"記録が増えるとグラフが表示されます"));
-  const chartData=data.filter(r=>r.exercise===selected).sort((a,b)=>new Date(a.date)-new Date(b.date))
+  const chartData=data.filter(r=>r.exercise===selected)
+    .sort((a,b)=>new Date(a.date)-new Date(b.date))
     .map(r=>({date:formatDate(r.date),総重量:r.total,最大重量:r.weight}));
+  const tooltipStyle={contentStyle:{background:"#1a1a2e",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}};
+  const gridStyle={strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"};
+  const tickStyle={fontSize:11,fill:"#888"};
   return React.createElement("div",{className:"charts-wrap"},
     React.createElement("div",{className:"exercise-pills"},
-      exercises.map(e=>React.createElement("button",{key:e,className:`pill${e===selected?" pill-active":""}`,onClick:()=>setSelected(e)},e))),
+      exercises.map(e=>React.createElement("button",{key:e,className:"pill"+(e===selected?" pill-active":""),onClick:()=>setSelected(e)},e))),
     React.createElement("div",{className:"card chart-card"},
       React.createElement("div",{className:"chart-title"},"総重量の推移 ",React.createElement("span",{className:"chart-unit"},"(kg)")),
       React.createElement(ResponsiveContainer,{width:"100%",height:200},
         React.createElement(LineChart,{data:chartData,margin:{top:5,right:16,left:-10,bottom:0}},
-          React.createElement(CartesianGrid,{strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"}),
-          React.createElement(XAxis,{dataKey:"date",tick:{fontSize:11,fill:"#888"}}),
-          React.createElement(YAxis,{tick:{fontSize:11,fill:"#888"}}),
-          React.createElement(Tooltip,{contentStyle:{background:"#1a1a2e",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}}),
+          React.createElement(CartesianGrid,gridStyle),
+          React.createElement(XAxis,{dataKey:"date",tick:tickStyle}),
+          React.createElement(YAxis,{tick:tickStyle}),
+          React.createElement(Tooltip,tooltipStyle),
           React.createElement(Line,{type:"monotone",dataKey:"総重量",stroke:"#e8a020",strokeWidth:2.5,dot:{r:4,fill:"#e8a020"},activeDot:{r:6}})))),
     React.createElement("div",{className:"card chart-card"},
       React.createElement("div",{className:"chart-title"},"最大重量の推移 ",React.createElement("span",{className:"chart-unit"},"(kg)")),
       React.createElement(ResponsiveContainer,{width:"100%",height:200},
         React.createElement(LineChart,{data:chartData,margin:{top:5,right:16,left:-10,bottom:0}},
-          React.createElement(CartesianGrid,{strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"}),
-          React.createElement(XAxis,{dataKey:"date",tick:{fontSize:11,fill:"#888"}}),
-          React.createElement(YAxis,{tick:{fontSize:11,fill:"#888"}}),
-          React.createElement(Tooltip,{contentStyle:{background:"#1a1a2e",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}}),
+          React.createElement(CartesianGrid,gridStyle),
+          React.createElement(XAxis,{dataKey:"date",tick:tickStyle}),
+          React.createElement(YAxis,{tick:tickStyle}),
+          React.createElement(Tooltip,tooltipStyle),
           React.createElement(Line,{type:"monotone",dataKey:"最大重量",stroke:"#4fc3f7",strokeWidth:2.5,dot:{r:4,fill:"#4fc3f7"},activeDot:{r:6}})))));
 }
 
@@ -202,7 +215,7 @@ function App(){
       .suggest-item{padding:10px 14px;font-size:.88rem;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s}
       .suggest-item:hover{background:#21213a}
       .suggest-badge{font-size:.62rem;background:#e8a02022;color:#e8a020;border-radius:4px;padding:1px 5px;flex-shrink:0}
-      .set-header-row{display:grid;grid-template-columns:24px 1fr 1fr 56px 28px;gap:8px;align-items:center;padding:0 0 4px;margin-bottom:2px}
+      .set-header-row{display:grid;grid-template-columns:24px 1fr 1fr 56px 28px;gap:8px;padding:0 0 4px;margin-bottom:2px}
       .set-col-label{font-size:.65rem;color:#555;text-align:center}
       .set-subtotal-label{text-align:right}
       .set-row{display:grid;grid-template-columns:24px 1fr 1fr 56px 28px;gap:8px;align-items:center;margin-bottom:8px}
@@ -217,7 +230,7 @@ function App(){
       .total-label{font-size:.8rem;color:#777}
       .total-value{font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:#e8a020;letter-spacing:1px}
       .save-btn{width:100%;background:#e8a020;color:#0d0d14;border:none;border-radius:10px;padding:13px;font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .2s}
-      .save-btn:hover{background:#f0b030;transform:translateY(-1px)}
+      .save-btn:hover{background:#f0b030}
       .save-btn.saved{background:#2a7a2a;color:#7fff7f}
       .history-wrap{padding:0 16px}
       .day-group{margin-bottom:20px}
@@ -258,12 +271,12 @@ function App(){
       React.createElement("div",{className:"header"},
         React.createElement("span",{className:"header-logo"},"IRON LOG"),
         React.createElement("span",{className:"header-sub"},"筋トレ記録"),
-        React.createElement("span",{className:"header-count"},data.length," records")),
+        React.createElement("span",{className:"header-count"},data.length+" records")),
       tab==="record"&&React.createElement(RecordForm,{onSave:refresh}),
       tab==="history"&&React.createElement(History,{data,onDelete:handleDelete}),
       tab==="chart"&&React.createElement(Charts,{data})),
     React.createElement("nav",{className:"bottom-nav"},
-      tabs.map(t=>React.createElement("button",{key:t.id,className:`nav-btn${tab===t.id?" active":""}`,onClick:()=>setTab(t.id)},
+      tabs.map(t=>React.createElement("button",{key:t.id,className:"nav-btn"+(tab===t.id?" active":""),onClick:()=>setTab(t.id)},
         React.createElement("span",{className:"nav-icon"},t.icon),
         React.createElement("span",{className:"nav-label"},t.label)))));
 }
