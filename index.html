@@ -106,47 +106,6 @@ const FOOD_NUTRITION_DB = {
   "プロテインシェイク": { kcal:130, protein:25.0, fat:2.0, carb:5.0, unit:"ml", defaultAmt:300 },
 };
 
-// ─── USDA FoodData Central API ───
-const USDA_API_KEY = "DEMO_KEY"; // ← 本番キーに差し替え可
-const USDA_CACHE_KEY = "usda_nutrition_cache_v1";
-
-function loadUsdaCache(){try{return JSON.parse(localStorage.getItem(USDA_CACHE_KEY)||"{}")}catch{return{}}}
-function saveUsdaCache(c){try{localStorage.setItem(USDA_CACHE_KEY,JSON.stringify(c))}catch{}}
-
-async function searchUsdaNutrition(query){
-  const cache = loadUsdaCache();
-  if(cache[query]) return cache[query];
-  try {
-    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&pageSize=6&dataType=SR%20Legacy,Survey%20(FNDDS),Foundation&api_key=${USDA_API_KEY}`;
-    const res = await fetch(url);
-    if(!res.ok) return null;
-    const data = await res.json();
-    if(!data.foods||!data.foods.length) return null;
-    // 候補リストを返す
-    const results = data.foods.slice(0,6).map(f=>{
-      const getNutr = (id) => {
-        const n = f.foodNutrients?.find(n=>n.nutrientId===id||n.nutrientNumber===String(id));
-        return n ? Math.round((n.value||0)*10)/10 : 0;
-      };
-      return {
-        fdcId: f.fdcId,
-        name: f.description,
-        kcal:    getNutr(1008)||getNutr(208),
-        protein: getNutr(1003)||getNutr(203),
-        fat:     getNutr(1004)||getNutr(204),
-        carb:    getNutr(1005)||getNutr(205),
-      };
-    }).filter(r=>r.kcal>0);
-    if(!results.length) return null;
-    const cacheEntry = { results, ts: Date.now() };
-    cache[query] = cacheEntry;
-    saveUsdaCache(cache);
-    return cacheEntry;
-  } catch(e) {
-    return null;
-  }
-}
-
 const MEAL_TIMES = [
   { id:"breakfast", label:"朝食", icon:"🌅", color:"#f0b030" },
   { id:"lunch",     label:"昼食", icon:"☀️", color:"#4fc3f7" },
@@ -413,117 +372,30 @@ function Charts({data}){
 
 // ─── MEAL COMPONENTS ───
 
-// 食品一行入力（USDA API検索対応）
+// 食品一行入力
 function MealFoodRow({row, index, onUpdate, onRemove}){
   const allFoodNames = Object.keys(FOOD_NUTRITION_DB);
   const usedFoods = [...new Set(loadMeals().flatMap(m=>m.items.map(i=>i.food)))];
   const pool = [...new Set([...usedFoods, ...allFoodNames])];
 
-  const [searchState, setSearchState] = useState("idle"); // idle | searching | results | error | notfound
-  const [usdaResults, setUsdaResults] = useState([]);
-  const [showResults, setShowResults] = useState(false);
-  const searchTimer = useRef(null);
-
   const db = FOOD_NUTRITION_DB[row.food];
-  // カスタム栄養素（USDA由来）はrow.customNutritionに入れる
-  const customN = row.customNutrition;
-  const unitLabel = customN ? "g" : (db ? db.unit : "g");
-
-  // 栄養素計算：ローカルDB優先、なければcustomNutrition使用
-  function getNutrition(){
-    if(!row.food || !row.amount) return null;
-    if(db) return calcNutrition(row.food, row.amount);
-    if(customN){
-      const ratio = (parseFloat(row.amount)||0)/100;
-      return {
-        kcal:    Math.round(customN.kcal    * ratio * 10)/10,
-        protein: Math.round(customN.protein * ratio * 10)/10,
-        fat:     Math.round(customN.fat     * ratio * 10)/10,
-        carb:    Math.round(customN.carb    * ratio * 10)/10,
-      };
-    }
-    return null;
-  }
-  const nutrition = getNutrition();
+  const unitLabel = db ? db.unit : "g";
+  const nutrition = row.food && row.amount ? calcNutrition(row.food, row.amount) : null;
 
   function handleFoodChange(val){
     const newDb = FOOD_NUTRITION_DB[val];
-    if(newDb){
-      // ローカルDBにある → 即セット、検索不要
-      onUpdate(index, { food: val, amount: String(newDb.defaultAmt), customNutrition: null });
-      setSearchState("idle"); setUsdaResults([]); setShowResults(false);
-      return;
-    }
-    onUpdate(index, { food: val, amount: row.amount||"100", customNutrition: null });
-    setSearchState("idle"); setUsdaResults([]); setShowResults(false);
-
-    // 3文字以上でデバウンス検索
-    clearTimeout(searchTimer.current);
-    if(val.length >= 2){
-      setSearchState("waiting");
-      searchTimer.current = setTimeout(async()=>{
-        setSearchState("searching");
-        const result = await searchUsdaNutrition(val);
-        if(!result){ setSearchState("notfound"); return; }
-        setUsdaResults(result.results);
-        setSearchState("results");
-        setShowResults(true);
-      }, 800);
-    }
+    onUpdate(index, { food: val, amount: newDb ? String(newDb.defaultAmt) : row.amount });
   }
-
-  function selectUsdaResult(r){
-    onUpdate(index, {
-      food: row.food,
-      amount: "100",
-      customNutrition: { kcal: r.kcal, protein: r.protein, fat: r.fat, carb: r.carb, sourceName: r.name }
-    });
-    setShowResults(false);
-    setSearchState("idle");
-  }
-
-  const isDbFood = !!db;
-  const isCustom = !!customN;
 
   return React.createElement("div",{className:"meal-food-row"},
     React.createElement("div",{className:"meal-food-row-top"},
-      React.createElement("div",{className:"meal-food-name-wrap",style:{position:"relative"}},
+      React.createElement("div",{className:"meal-food-name-wrap"},
         React.createElement(AutoCompleteInput,{
           value: row.food,
           onChange: handleFoodChange,
           pool,
-          placeholder: "食品名（例：鮭、salmon）"
-        }),
-        // USDA検索状態インジケーター
-        !isDbFood && row.food.length>=2 && React.createElement("div",{className:"usda-status"},
-          searchState==="waiting"   && React.createElement("span",{className:"usda-waiting"},"…"),
-          searchState==="searching" && React.createElement("span",{className:"usda-searching"},"🔍 検索中…"),
-          searchState==="notfound"  && React.createElement("span",{className:"usda-notfound"},"❌ 見つかりません"),
-          searchState==="error"     && React.createElement("span",{className:"usda-notfound"},"⚠️ エラー"),
-          searchState==="results"   && !showResults && React.createElement("button",{
-            className:"usda-reopen-btn",
-            onClick:()=>setShowResults(true)
-          },"📋 候補を表示")
-        ),
-        // USDA候補リスト
-        showResults && usdaResults.length>0 && React.createElement("div",{className:"usda-results"},
-          React.createElement("div",{className:"usda-results-header"},
-            React.createElement("span",null,"🌐 USDA検索結果"),
-            React.createElement("button",{className:"usda-close-btn",onClick:()=>setShowResults(false)},"✕")),
-          usdaResults.map((r,i)=>React.createElement("div",{
-            key:i, className:"usda-result-item",
-            onClick:()=>selectUsdaResult(r)
-          },
-            React.createElement("div",{className:"usda-result-name"},r.name),
-            React.createElement("div",{className:"usda-result-nutr"},
-              React.createElement("span",{className:"mn-kcal"},r.kcal+"kcal"),
-              React.createElement("span",{className:"mn-sep"},"·"),
-              React.createElement("span",{className:"mn-p"},"P"+r.protein),
-              React.createElement("span",{className:"mn-f"},"F"+r.fat),
-              React.createElement("span",{className:"mn-c"},"C"+r.carb),
-              React.createElement("span",{className:"usda-per"},"/100g"))))
-        )
-      ),
+          placeholder: "食品名"
+        })),
       React.createElement("div",{className:"meal-food-amount-wrap"},
         React.createElement("input",{
           className:"field-input meal-amount-input",
@@ -534,12 +406,6 @@ function MealFoodRow({row, index, onUpdate, onRemove}){
         }),
         React.createElement("span",{className:"meal-unit-badge"},unitLabel)),
       React.createElement("button",{className:"set-del-btn",onClick:()=>onRemove(index)},"✕")),
-
-    // 栄養素ソース表示
-    isCustom && React.createElement("div",{className:"usda-source-label"},
-      "🌐 ",customN.sourceName),
-
-    // 栄養素表示
     nutrition&&nutrition.kcal>0&&React.createElement("div",{className:"meal-food-nutrition"},
       React.createElement("span",{className:"mn-kcal"},nutrition.kcal+"kcal"),
       React.createElement("span",{className:"mn-sep"},"·"),
@@ -553,16 +419,7 @@ function MealFoodRow({row, index, onUpdate, onRemove}){
 function MealTimeBlock({timeSlot, rows, onUpdate, onAdd, onRemove}){
   const [collapsed, setCollapsed] = useState(false);
   const totals = rows.reduce((acc,r)=>{
-    let n = {kcal:0,protein:0,fat:0,carb:0};
-    if(r.food&&r.amount){
-      const db=FOOD_NUTRITION_DB[r.food];
-      if(db) n=calcNutrition(r.food,r.amount);
-      else if(r.customNutrition){
-        const ratio=(parseFloat(r.amount)||0)/100;
-        n={kcal:r.customNutrition.kcal*ratio,protein:r.customNutrition.protein*ratio,
-           fat:r.customNutrition.fat*ratio,carb:r.customNutrition.carb*ratio};
-      }
-    }
+    const n = r.food&&r.amount ? calcNutrition(r.food,r.amount) : {kcal:0,protein:0,fat:0,carb:0};
     return {kcal:acc.kcal+n.kcal, protein:acc.protein+n.protein, fat:acc.fat+n.fat, carb:acc.carb+n.carb};
   },{kcal:0,protein:0,fat:0,carb:0});
   const hasData = rows.some(r=>r.food&&parseFloat(r.amount)>0);
@@ -622,20 +479,9 @@ function MealRecord({onSave}){
     MEAL_TIMES.forEach(t=>{
       slots[t.id].forEach(r=>{
         if(r.food&&parseFloat(r.amount)>0){
-          let n;
-          const db=FOOD_NUTRITION_DB[r.food];
-          if(db) n=calcNutrition(r.food,r.amount);
-          else if(r.customNutrition){
-            const ratio=(parseFloat(r.amount)||0)/100;
-            n={kcal:Math.round(r.customNutrition.kcal*ratio*10)/10,
-               protein:Math.round(r.customNutrition.protein*ratio*10)/10,
-               fat:Math.round(r.customNutrition.fat*ratio*10)/10,
-               carb:Math.round(r.customNutrition.carb*ratio*10)/10};
-          } else { n={kcal:0,protein:0,fat:0,carb:0}; }
+          const n=calcNutrition(r.food,r.amount);
           items.push({timeId:t.id,food:r.food,amount:parseFloat(r.amount),
-            unit:db?.unit||"g",
-            sourceName:r.customNutrition?.sourceName||null,
-            ...n});
+            unit:FOOD_NUTRITION_DB[r.food]?.unit||"g",...n});
         }
       });
     });
@@ -1079,24 +925,7 @@ function App(){
       .mhe-food-amount{font-size:.72rem;color:#777;text-align:center}
       .mhe-food-kcal{font-family:'Bebas Neue',sans-serif;font-size:.9rem;color:#f0b030;text-align:right}
       .mhe-food-macros{font-size:.6rem;color:#666;text-align:right}
-      /* USDA Search */
-      .usda-status{margin-top:4px;font-size:.72rem;padding-left:2px}
-      .usda-waiting{color:#555}
-      .usda-searching{color:#4fc3f7;animation:pulse 1s infinite}
-      @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-      .usda-notfound{color:#a06060}
-      .usda-reopen-btn{background:none;border:1px solid #2e4a2e;border-radius:6px;color:#60d080;font-size:.7rem;padding:2px 8px;cursor:pointer;font-family:inherit}
-      .usda-results{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#1a2a1a;border:1px solid #2e4a2e;border-radius:10px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.6);overflow:hidden}
-      .usda-results-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #2e4a2e;font-size:.7rem;color:#60d080;letter-spacing:.3px}
-      .usda-close-btn{background:none;border:none;color:#555;cursor:pointer;font-size:.8rem;padding:0 2px}
-      .usda-result-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid #1e2e1e;transition:background .15s}
-      .usda-result-item:last-child{border-bottom:none}
-      .usda-result-item:hover{background:#253525}
-      .usda-result-name{font-size:.8rem;color:#ccc;margin-bottom:3px;line-height:1.3}
-      .usda-result-nutr{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-      .usda-per{font-size:.62rem;color:#555}
-      .usda-source-label{font-size:.62rem;color:#4a8a4a;margin-top:4px;padding-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
+      /* PFC Pie */
       .pfc-layout{display:flex;align-items:center;gap:16px}
       .pfc-legend{display:flex;flex-direction:column;gap:8px;flex:1}
       .pfc-legend-item{display:flex;align-items:center;gap:8px}
