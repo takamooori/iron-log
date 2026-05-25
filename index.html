@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="IRON LOG" />
-  <meta name="theme-color" content="#0d0d14" />
+  <meta name="theme-color" content="#1a1a28" />
   <title>IRON LOG</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.png" />
@@ -14,9 +14,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d0d14; color: #e8e8f0; font-family: 'Noto Sans JP', sans-serif; min-height: 100vh; }
+    body { background: #1a1a28; color: #eeeef8; font-family: 'Noto Sans JP', sans-serif; min-height: 100vh; }
     #root { max-width: 480px; margin: 0 auto; }
-    #loading { display:flex; align-items:center; justify-content:center; height:100vh; color:#e8a020; font-family:'Bebas Neue',sans-serif; font-size:2rem; letter-spacing:4px; }
+    #loading { display:flex; align-items:center; justify-content:center; height:100vh; background:#1a1a28; color:#e8a020; font-family:'Bebas Neue',sans-serif; font-size:2rem; letter-spacing:4px; }
   </style>
 </head>
 <body>
@@ -161,7 +161,7 @@ function Charts({data}){
   const chartData=data.filter(r=>r.exercise===selected)
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
     .map(r=>({date:formatDate(r.date),総重量:r.total,最大重量:r.weight}));
-  const tooltipStyle={contentStyle:{background:"#1a1a2e",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}};
+  const tooltipStyle={contentStyle:{background:"#252540",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}};
   const gridStyle={strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"};
   const tickStyle={fontSize:11,fill:"#888"};
   return React.createElement("div",{className:"charts-wrap"},
@@ -198,25 +198,25 @@ function App(){
       .app{max-width:480px;margin:0 auto;padding-bottom:88px}
       .header{padding:28px 20px 16px;display:flex;align-items:baseline;gap:10px}
       .header-logo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:3px;color:#e8a020;line-height:1}
-      .header-sub{font-size:.7rem;color:#666;letter-spacing:1px;text-transform:uppercase}
-      .header-count{margin-left:auto;font-size:.75rem;color:#555}
-      .card{background:#13131f;border:1px solid #1e1e30;border-radius:14px;padding:20px;margin:0 16px 16px}
+      .header-sub{font-size:.7rem;color:#888;letter-spacing:1px;text-transform:uppercase}
+      .header-count{margin-left:auto;font-size:.75rem;color:#777}
+      .card{background:#22223a;border:1px solid #2e2e48;border-radius:14px;padding:20px;margin:0 16px 16px}
       .card-header{display:flex;align-items:center;gap:8px;margin-bottom:18px}
       .card-icon{width:28px;height:28px;background:#e8a020;color:#0d0d14;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:bold;flex-shrink:0}
       .card-title{font-size:.95rem;font-weight:700;color:#ddd;letter-spacing:.5px}
       .field-group{display:flex;flex-direction:column;gap:5px}
-      .field-label{font-size:.72rem;color:#888;letter-spacing:.5px}
+      .field-label{font-size:.72rem;color:#aaa;letter-spacing:.5px}
       .unit{color:#666;font-size:.7rem}
-      .field-input{width:100%;background:#0d0d14;border:1px solid #252535;border-radius:8px;padding:10px 12px;color:#e8e8f0;font-size:.95rem;font-family:inherit;outline:none;transition:border-color .2s}
+      .field-input{width:100%;background:#14142a;border:1px solid #32324a;border-radius:8px;padding:10px 12px;color:#eeeef8;font-size:.95rem;font-family:inherit;outline:none;transition:border-color .2s}
       .field-input:focus{border-color:#e8a020}
-      .field-input::placeholder{color:#3a3a4a}
+      .field-input::placeholder{color:#555570}
       input[type=number]::-webkit-inner-spin-button{opacity:.3}
-      .suggest-list{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#1a1a2e;border:1px solid #2a2a40;border-radius:10px;overflow:hidden;z-index:100;list-style:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+      .suggest-list{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#252540;border:1px solid #38385a;border-radius:10px;overflow:hidden;z-index:100;list-style:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
       .suggest-item{padding:10px 14px;font-size:.88rem;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s}
-      .suggest-item:hover{background:#21213a}
+      .suggest-item:hover{background:#2e2e50}
       .suggest-badge{font-size:.62rem;background:#e8a02022;color:#e8a020;border-radius:4px;padding:1px 5px;flex-shrink:0}
       .set-header-row{display:grid;grid-template-columns:24px 1fr 1fr 56px 28px;gap:8px;padding:0 0 4px;margin-bottom:2px}
-      .set-col-label{font-size:.65rem;color:#555;text-align:center}
+      .set-col-label{font-size:.65rem;color:#888;text-align:center}
       .set-subtotal-label{text-align:right}
       .set-row{display:grid;grid-template-columns:24px 1fr 1fr 56px 28px;gap:8px;align-items:center;margin-bottom:8px}
       .set-num{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#e8a020;text-align:center;line-height:1}
@@ -226,7 +226,7 @@ function App(){
       .set-del-btn:hover{color:#cc4444}
       .add-set-btn{width:100%;background:transparent;border:1px dashed #252535;border-radius:8px;color:#555;padding:9px;font-size:.82rem;font-family:inherit;cursor:pointer;margin:4px 0 14px;transition:all .2s;letter-spacing:.5px}
       .add-set-btn:hover{border-color:#e8a020;color:#e8a020}
-      .total-bar{display:flex;justify-content:space-between;align-items:center;background:#0a0a12;border:1px solid #1e1e30;border-radius:10px;padding:12px 16px;margin-bottom:16px}
+      .total-bar{display:flex;justify-content:space-between;align-items:center;background:#13132a;border:1px solid #2e2e48;border-radius:10px;padding:12px 16px;margin-bottom:16px}
       .total-label{font-size:.8rem;color:#777}
       .total-value{font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:#e8a020;letter-spacing:1px}
       .save-btn{width:100%;background:#e8a020;color:#0d0d14;border:none;border-radius:10px;padding:13px;font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .2s}
@@ -234,8 +234,8 @@ function App(){
       .save-btn.saved{background:#2a7a2a;color:#7fff7f}
       .history-wrap{padding:0 16px}
       .day-group{margin-bottom:20px}
-      .day-label{font-size:.72rem;color:#666;letter-spacing:1px;margin-bottom:8px;padding-left:4px;text-transform:uppercase}
-      .history-card{background:#13131f;border:1px solid #1e1e30;border-radius:12px;padding:12px 14px;margin-bottom:8px}
+      .day-label{font-size:.72rem;color:#888;letter-spacing:1px;margin-bottom:8px;padding-left:4px;text-transform:uppercase}
+      .history-card{background:#22223a;border:1px solid #2e2e48;border-radius:12px;padding:12px 14px;margin-bottom:8px}
       .hc-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
       .hc-exercise{font-size:.9rem;font-weight:700;color:#ddd;flex:1}
       .hc-total-val{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#e8a020}
@@ -244,22 +244,22 @@ function App(){
       .hc-sets{display:flex;flex-direction:column;gap:4px}
       .hc-set-row{display:flex;align-items:center;gap:10px}
       .hc-set-num{font-size:.65rem;color:#555;width:34px;flex-shrink:0}
-      .hc-set-detail{font-size:.82rem;color:#888;flex:1}
+      .hc-set-detail{font-size:.82rem;color:#aaa;flex:1}
       .hc-set-sub{font-size:.78rem;color:#666}
       .charts-wrap{padding:0 16px}
       .exercise-pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-      .pill{background:#13131f;border:1px solid #1e1e30;border-radius:20px;padding:6px 14px;font-size:.78rem;color:#777;cursor:pointer;font-family:inherit;transition:all .2s}
+      .pill{background:#22223a;border:1px solid #2e2e48;border-radius:20px;padding:6px 14px;font-size:.78rem;color:#777;cursor:pointer;font-family:inherit;transition:all .2s}
       .pill:hover{border-color:#e8a020;color:#ddd}
       .pill-active{background:#e8a02018;border-color:#e8a020;color:#e8a020}
       .chart-card{padding:16px 16px 8px}
-      .chart-title{font-size:.8rem;color:#888;margin-bottom:12px;letter-spacing:.3px}
-      .chart-unit{color:#555}
+      .chart-title{font-size:.8rem;color:#aaa;margin-bottom:12px;letter-spacing:.3px}
+      .chart-unit{color:#777}
       .empty-card{text-align:center;padding:40px 20px}
       .empty-icon{font-size:2.5rem;margin-bottom:12px;opacity:.4}
-      .empty-text{font-size:.9rem;color:#666;margin-bottom:6px}
-      .empty-sub{font-size:.75rem;color:#444}
-      .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#10101a;border-top:1px solid #1e1e30;display:flex;justify-content:center}
-      .nav-btn{flex:1;max-width:160px;background:none;border:none;color:#444;padding:12px 0;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s}
+      .empty-text{font-size:.9rem;color:#888;margin-bottom:6px}
+      .empty-sub{font-size:.75rem;color:#666}
+      .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#181830;border-top:1px solid #2e2e48;display:flex;justify-content:center}
+      .nav-btn{flex:1;max-width:160px;background:none;border:none;color:#666;padding:12px 0;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s}
       .nav-btn.active{color:#e8a020}
       .nav-icon{font-size:1.2rem}
       .nav-label{font-size:.65rem;letter-spacing:.5px}
