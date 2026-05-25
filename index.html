@@ -22,17 +22,16 @@
 <body>
   <div id="root"><div id="loading">IRON LOG</div></div>
 
-  <!-- React 18 -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Recharts (依存: prop-types) -->
   <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
   <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 
   <script>
-const { useState, useEffect, useRef } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
+const { useState, useEffect, useRef, useMemo } = React;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } = Recharts;
 
+// ─── Workout data ───
 const PRESET_EXERCISES = [
   "ベンチプレス","インクラインベンチプレス","ダンベルフライ","ケーブルクロスオーバー",
   "スクワット","レッグプレス","レッグカール","レッグエクステンション","ブルガリアンスクワット",
@@ -41,17 +40,137 @@ const PRESET_EXERCISES = [
   "バーベルカール","ハンマーカール","トライセプスプレスダウン","スカルクラッシャー",
   "プランク","クランチ","レッグレイズ","ヒップスラスト","カーフレイズ"
 ];
-const STORAGE_KEY = "workout_log_v2";
-function loadData(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]")}catch{return[]}}
-function saveData(d){localStorage.setItem(STORAGE_KEY,JSON.stringify(d))}
+
+// ─── Meal data ───
+// 栄養素DB (per 100g): { kcal, protein, fat, carb }
+const FOOD_NUTRITION_DB = {
+  // 主食
+  "白米（茶碗1杯）":    { kcal:168, protein:2.5, fat:0.3, carb:37.1, unit:"g", defaultAmt:150 },
+  "玄米":               { kcal:165, protein:2.8, fat:1.0, carb:35.6, unit:"g", defaultAmt:150 },
+  "食パン":             { kcal:264, protein:9.3, fat:4.4, carb:46.7, unit:"g", defaultAmt:60 },
+  "うどん（茹で）":     { kcal:95,  protein:2.6, fat:0.4, carb:20.8, unit:"g", defaultAmt:200 },
+  "そば（茹で）":       { kcal:132, protein:4.8, fat:1.0, carb:26.0, unit:"g", defaultAmt:200 },
+  "パスタ（茹で）":     { kcal:149, protein:5.8, fat:0.9, carb:30.3, unit:"g", defaultAmt:200 },
+  "オートミール":       { kcal:380, protein:13.7, fat:5.7, carb:69.1, unit:"g", defaultAmt:50 },
+  // 肉類
+  "鶏むね肉":           { kcal:116, protein:24.4, fat:1.9, carb:0.0, unit:"g", defaultAmt:150 },
+  "鶏もも肉":           { kcal:204, protein:17.3, fat:14.2, carb:0.0, unit:"g", defaultAmt:150 },
+  "鶏ささみ":           { kcal:109, protein:23.9, fat:0.8, carb:0.0, unit:"g", defaultAmt:100 },
+  "豚ロース":           { kcal:263, protein:19.3, fat:19.2, carb:0.2, unit:"g", defaultAmt:150 },
+  "豚バラ":             { kcal:395, protein:14.4, fat:35.4, carb:0.1, unit:"g", defaultAmt:120 },
+  "牛もも肉":           { kcal:209, protein:21.2, fat:13.3, carb:0.6, unit:"g", defaultAmt:150 },
+  "牛ヒレ":             { kcal:207, protein:20.5, fat:13.4, carb:0.3, unit:"g", defaultAmt:150 },
+  "ひき肉（合挽き）":   { kcal:272, protein:17.2, fat:21.1, carb:0.3, unit:"g", defaultAmt:120 },
+  // 魚介類
+  "サーモン":           { kcal:204, protein:20.1, fat:13.4, carb:0.1, unit:"g", defaultAmt:120 },
+  "まぐろ（赤身）":     { kcal:125, protein:26.4, fat:1.4, carb:0.1, unit:"g", defaultAmt:100 },
+  "さば":               { kcal:202, protein:20.6, fat:12.1, carb:0.3, unit:"g", defaultAmt:120 },
+  "イワシ":             { kcal:217, protein:19.8, fat:13.9, carb:0.5, unit:"g", defaultAmt:100 },
+  "えび":               { kcal:83,  protein:18.4, fat:0.3, carb:0.7, unit:"g", defaultAmt:80 },
+  // 卵・乳製品
+  "卵":                 { kcal:151, protein:12.3, fat:10.3, carb:0.3, unit:"個", defaultAmt:1, perUnitG:60 },
+  "ゆで卵":             { kcal:151, protein:12.3, fat:10.3, carb:0.3, unit:"個", defaultAmt:1, perUnitG:60 },
+  "牛乳":               { kcal:67,  protein:3.3, fat:3.8, carb:4.8, unit:"ml", defaultAmt:200 },
+  "ギリシャヨーグルト": { kcal:59,  protein:10.0, fat:0.4, carb:3.6, unit:"g", defaultAmt:150 },
+  "無脂肪ヨーグルト":   { kcal:45,  protein:3.7, fat:0.2, carb:5.7, unit:"g", defaultAmt:150 },
+  "カッテージチーズ":   { kcal:99,  protein:13.3, fat:4.3, carb:1.8, unit:"g", defaultAmt:100 },
+  "プロセスチーズ":     { kcal:339, protein:22.7, fat:26.0, carb:1.3, unit:"g", defaultAmt:25 },
+  // 豆類・大豆製品
+  "豆腐（木綿）":       { kcal:72,  protein:7.0, fat:4.3, carb:1.5, unit:"g", defaultAmt:150 },
+  "豆腐（絹）":         { kcal:56,  protein:5.3, fat:3.0, carb:2.0, unit:"g", defaultAmt:150 },
+  "納豆":               { kcal:200, protein:16.5, fat:10.0, carb:12.1, unit:"g", defaultAmt:50 },
+  "枝豆":               { kcal:135, protein:11.5, fat:6.1, carb:8.8, unit:"g", defaultAmt:80 },
+  // プロテイン・サプリ
+  "プロテイン（ホエイ）":{ kcal:380, protein:75.0, fat:5.0, carb:10.0, unit:"g", defaultAmt:30 },
+  "プロテイン（カゼイン）":{ kcal:370, protein:80.0, fat:2.0, carb:8.0, unit:"g", defaultAmt:30 },
+  "プロテインバー":     { kcal:204, protein:20.0, fat:7.0, carb:17.0, unit:"個", defaultAmt:1, perUnitG:55 },
+  // 野菜
+  "ブロッコリー":       { kcal:33,  protein:4.3, fat:0.5, carb:5.2, unit:"g", defaultAmt:100 },
+  "ほうれん草":         { kcal:20,  protein:2.2, fat:0.4, carb:3.1, unit:"g", defaultAmt:80 },
+  "トマト":             { kcal:20,  protein:0.7, fat:0.1, carb:4.7, unit:"g", defaultAmt:100 },
+  "きゅうり":           { kcal:14,  protein:1.0, fat:0.1, carb:3.0, unit:"g", defaultAmt:80 },
+  "アボカド":           { kcal:187, protein:2.5, fat:18.7, carb:2.3, unit:"g", defaultAmt:80 },
+  "さつまいも":         { kcal:132, protein:1.2, fat:0.2, carb:31.9, unit:"g", defaultAmt:120 },
+  // フルーツ
+  "バナナ":             { kcal:86,  protein:1.1, fat:0.2, carb:22.5, unit:"本", defaultAmt:1, perUnitG:100 },
+  "りんご":             { kcal:61,  protein:0.2, fat:0.2, carb:15.5, unit:"個", defaultAmt:1, perUnitG:200 },
+  "みかん":             { kcal:46,  protein:0.7, fat:0.1, carb:12.0, unit:"個", defaultAmt:1, perUnitG:80 },
+  "いちご":             { kcal:34,  protein:0.9, fat:0.1, carb:8.5, unit:"g", defaultAmt:100 },
+  "ブルーベリー":       { kcal:49,  protein:0.4, fat:0.3, carb:12.9, unit:"g", defaultAmt:80 },
+  // ナッツ・種子
+  "アーモンド":         { kcal:609, protein:20.3, fat:51.8, carb:19.7, unit:"g", defaultAmt:25 },
+  "くるみ":             { kcal:713, protein:14.6, fat:68.8, carb:11.7, unit:"g", defaultAmt:20 },
+  "ピーナッツバター":   { kcal:599, protein:24.4, fat:50.4, carb:17.3, unit:"g", defaultAmt:20 },
+  // 飲料
+  "コーヒー（無糖）":   { kcal:4,   protein:0.2, fat:0.0, carb:0.7, unit:"ml", defaultAmt:200 },
+  "プロテインシェイク": { kcal:130, protein:25.0, fat:2.0, carb:5.0, unit:"ml", defaultAmt:300 },
+};
+
+const MEAL_TIMES = [
+  { id:"breakfast", label:"朝食", icon:"🌅", color:"#f0b030" },
+  { id:"lunch",     label:"昼食", icon:"☀️", color:"#4fc3f7" },
+  { id:"dinner",    label:"夕食", icon:"🌙", color:"#9c7af0" },
+  { id:"snack",     label:"間食", icon:"🍎", color:"#60d080" },
+];
+
+const STORAGE_KEY_WORKOUT = "workout_log_v2";
+const STORAGE_KEY_MEAL    = "meal_log_v1";
+
+function loadWorkout(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_WORKOUT)||"[]")}catch{return[]}}
+function saveWorkout(d){localStorage.setItem(STORAGE_KEY_WORKOUT,JSON.stringify(d))}
+function loadMeals(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_MEAL)||"[]")}catch{return[]}}
+function saveMeals(d){localStorage.setItem(STORAGE_KEY_MEAL,JSON.stringify(d))}
+
+function todayISO(){return new Date().toISOString().slice(0,10)}
 function formatDate(iso){const d=new Date(iso);return`${d.getMonth()+1}/${d.getDate()}`}
 function formatDateFull(iso){const d=new Date(iso);return`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`}
 
+// 栄養素計算
+function calcNutrition(foodName, amount){
+  const db = FOOD_NUTRITION_DB[foodName];
+  if(!db) return { kcal:0, protein:0, fat:0, carb:0 };
+  let grams = parseFloat(amount)||0;
+  if(db.unit==="個"||db.unit==="本") grams = grams*(db.perUnitG||100);
+  else if(db.unit==="ml") grams = grams; // mlをgとして近似
+  const ratio = grams/100;
+  return {
+    kcal:    Math.round(db.kcal    * ratio * 10)/10,
+    protein: Math.round(db.protein * ratio * 10)/10,
+    fat:     Math.round(db.fat     * ratio * 10)/10,
+    carb:    Math.round(db.carb    * ratio * 10)/10,
+  };
+}
+
+// ─── Generic AutoComplete Input ───
+function AutoCompleteInput({value, onChange, pool, placeholder}){
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const suggestions = value.length===0
+    ? pool.slice(0,8)
+    : pool.filter(e=>e.includes(value)).slice(0,8);
+
+  useEffect(()=>{
+    const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};
+    document.addEventListener("mousedown",h);
+    return()=>document.removeEventListener("mousedown",h);
+  },[]);
+
+  return React.createElement("div",{ref,style:{position:"relative"}},
+    React.createElement("input",{className:"field-input",placeholder,value,
+      onChange:e=>{onChange(e.target.value);setOpen(true)},
+      onFocus:()=>setOpen(true),autoComplete:"off"}),
+    open&&suggestions.length>0&&React.createElement("ul",{className:"suggest-list"},
+      suggestions.map(s=>React.createElement("li",{key:s,className:"suggest-item",
+        onMouseDown:()=>{onChange(s);setOpen(false)}},s)))
+  );
+}
+
+// ─── Workout Components ───
 function ExerciseInput({value,onChange}){
+  const usedExercises=[...new Set(loadWorkout().map(r=>r.exercise))];
+  const pool=[...new Set([...usedExercises,...PRESET_EXERCISES])];
   const [open,setOpen]=useState(false);
   const ref=useRef(null);
-  const usedExercises=[...new Set(loadData().map(r=>r.exercise))];
-  const pool=[...new Set([...usedExercises,...PRESET_EXERCISES])];
   const suggestions=value.length===0?pool.slice(0,8):pool.filter(e=>e.includes(value)).slice(0,8);
   useEffect(()=>{
     const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};
@@ -87,7 +206,7 @@ function RecordForm({onSave}){
       weight:Math.max(...validSets.map(r=>parseFloat(r.weight))),
       total:validSets.reduce((s,r)=>s+parseFloat(r.weight)*parseInt(r.reps),0)
     };
-    const all=loadData();all.push(record);saveData(all);onSave();
+    const all=loadWorkout();all.push(record);saveWorkout(all);onSave();
     setSaved(true);setExercise("");setRows([{weight:"",reps:""}]);
     setTimeout(()=>setSaved(false),1800);
   }
@@ -155,8 +274,6 @@ function History({data,onDelete}){
   const [year,setYear]=useState(now.getFullYear());
   const [month,setMonth]=useState(now.getMonth());
   const [selected,setSelected]=useState(null);
-
-  // 記録を日付文字列キーでマップ化
   const byDate={};
   data.forEach(r=>{
     const d=new Date(r.date);
@@ -164,75 +281,52 @@ function History({data,onDelete}){
     if(!byDate[key])byDate[key]=[];
     byDate[key].push(r);
   });
-
-  // カレンダー構築
   const firstDay=new Date(year,month,1).getDay();
   const daysInMonth=new Date(year,month+1,0).getDate();
   const today=new Date();
   const isToday=(d)=>d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
-
   function prevMonth(){if(month===0){setYear(y=>y-1);setMonth(11)}else setMonth(m=>m-1)}
   function nextMonth(){if(month===11){setYear(y=>y+1);setMonth(0)}else setMonth(m=>m+1)}
-
   function getKey(d){return`${year}/${String(month+1).padStart(2,"0")}/${String(d).padStart(2,"0")}`}
   function getIntensity(d){
     const recs=byDate[getKey(d)];
     if(!recs)return 0;
     return recs.length>=3?3:recs.length>=2?2:1;
   }
-
   const monthNames=["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   const dayNames=["日","月","火","水","木","金","土"];
-
-  // 記録がある月を集計（ヒートマップ用）
-  const hasAny=data.length>0;
-
   const cells=[];
   for(let i=0;i<firstDay;i++)cells.push(null);
   for(let d=1;d<=daysInMonth;d++)cells.push(d);
-
-  if(!hasAny)return React.createElement("div",{className:"card empty-card"},
+  if(!data.length)return React.createElement("div",{className:"card empty-card"},
     React.createElement("div",{className:"empty-icon"},"📅"),
     React.createElement("p",{className:"empty-text"},"まだ記録がありません"),
     React.createElement("p",{className:"empty-sub"},"記録タブからトレーニングを追加してみよう"));
-
   return React.createElement("div",{className:"history-wrap"},
-    // ヘッダー
     React.createElement("div",{className:"cal-header"},
       React.createElement("button",{className:"cal-nav-btn",onClick:prevMonth},"‹"),
       React.createElement("span",{className:"cal-month-label"},`${year}年 ${monthNames[month]}`),
       React.createElement("button",{className:"cal-nav-btn",onClick:nextMonth},"›")),
-    // 曜日ヘッダー
     React.createElement("div",{className:"cal-grid"},
       dayNames.map(d=>React.createElement("div",{key:d,className:"cal-dow"},d)),
-      // 日付セル
       cells.map((d,i)=>{
         if(d===null)return React.createElement("div",{key:`e${i}`,className:"cal-cell cal-empty"});
         const intensity=getIntensity(d);
         const key=getKey(d);
         const active=selected===key;
         return React.createElement("div",{
-          key:d,
-          className:`cal-cell${intensity>0?" cal-has-rec":""}${isToday(d)?" cal-today":""}${active?" cal-selected":""}`,
-          "data-intensity":intensity,
-          onClick:()=>{
-            if(intensity>0){setSelected(key);}
-          }
-        },
+          key:d,className:`cal-cell${intensity>0?" cal-has-rec":""}${isToday(d)?" cal-today":""}${active?" cal-selected":""}`,
+          "data-intensity":intensity,onClick:()=>{if(intensity>0)setSelected(key)}},
           React.createElement("span",{className:"cal-day-num"},d),
-          intensity>0&&React.createElement("div",{className:`cal-dot cal-dot-${intensity}`})
-        );
+          intensity>0&&React.createElement("div",{className:`cal-dot cal-dot-${intensity}`}));
       })),
-    // 凡例
     React.createElement("div",{className:"cal-legend"},
       React.createElement("span",{className:"cal-legend-label"},"記録数:"),
       [1,2,3].map(i=>React.createElement("div",{key:i,className:"cal-legend-item"},
         React.createElement("div",{className:`cal-dot cal-dot-${i}`}),
         React.createElement("span",null,i===1?"1件":i===2?"2件":"3件+")))),
-    // モーダル
     selected&&byDate[selected]&&React.createElement(DayModal,{
-      date:selected,
-      records:byDate[selected],
+      date:selected,records:byDate[selected],
       onDelete:(id)=>{onDelete(id);if(!byDate[selected]||byDate[selected].length<=1)setSelected(null)},
       onClose:()=>setSelected(null)
     })
@@ -243,7 +337,7 @@ function Charts({data}){
   const exercises=[...new Set(data.map(r=>r.exercise))];
   const [selected,setSelected]=useState(exercises[0]||"");
   useEffect(()=>{if(!selected&&exercises.length>0)setSelected(exercises[0])},[exercises.length]);
-  if(data.length===0)return React.createElement("div",{className:"card empty-card"},
+  if(!data.length)return React.createElement("div",{className:"card empty-card"},
     React.createElement("div",{className:"empty-icon"},"📈"),
     React.createElement("p",{className:"empty-text"},"データがありません"),
     React.createElement("p",{className:"empty-sub"},"記録が増えるとグラフが表示されます"));
@@ -276,12 +370,388 @@ function Charts({data}){
           React.createElement(Line,{type:"monotone",dataKey:"最大重量",stroke:"#4fc3f7",strokeWidth:2.5,dot:{r:4,fill:"#4fc3f7"},activeDot:{r:6}})))));
 }
 
+// ─── MEAL COMPONENTS ───
+
+// 食品一行入力
+function MealFoodRow({row, index, onUpdate, onRemove}){
+  const allFoodNames = Object.keys(FOOD_NUTRITION_DB);
+  const usedFoods = [...new Set(loadMeals().flatMap(m=>m.items.map(i=>i.food)))];
+  const pool = [...new Set([...usedFoods, ...allFoodNames])];
+
+  const db = FOOD_NUTRITION_DB[row.food];
+  const unitLabel = db ? db.unit : "g";
+  const nutrition = row.food && row.amount ? calcNutrition(row.food, row.amount) : null;
+
+  function handleFoodChange(val){
+    const newDb = FOOD_NUTRITION_DB[val];
+    onUpdate(index, { food: val, amount: newDb ? String(newDb.defaultAmt) : row.amount });
+  }
+
+  return React.createElement("div",{className:"meal-food-row"},
+    React.createElement("div",{className:"meal-food-row-top"},
+      React.createElement("div",{className:"meal-food-name-wrap"},
+        React.createElement(AutoCompleteInput,{
+          value: row.food,
+          onChange: handleFoodChange,
+          pool,
+          placeholder: "食品名"
+        })),
+      React.createElement("div",{className:"meal-food-amount-wrap"},
+        React.createElement("input",{
+          className:"field-input meal-amount-input",
+          type:"number",min:"0",step:"1",
+          placeholder: db ? String(db.defaultAmt) : "100",
+          value: row.amount,
+          onChange: e=>onUpdate(index,{amount:e.target.value})
+        }),
+        React.createElement("span",{className:"meal-unit-badge"},unitLabel)),
+      React.createElement("button",{className:"set-del-btn",onClick:()=>onRemove(index)},"✕")),
+    nutrition&&nutrition.kcal>0&&React.createElement("div",{className:"meal-food-nutrition"},
+      React.createElement("span",{className:"mn-kcal"},nutrition.kcal+"kcal"),
+      React.createElement("span",{className:"mn-sep"},"·"),
+      React.createElement("span",{className:"mn-p"},"P "+nutrition.protein+"g"),
+      React.createElement("span",{className:"mn-f"},"F "+nutrition.fat+"g"),
+      React.createElement("span",{className:"mn-c"},"C "+nutrition.carb+"g"))
+  );
+}
+
+// 時間帯ブロック
+function MealTimeBlock({timeSlot, rows, onUpdate, onAdd, onRemove}){
+  const [collapsed, setCollapsed] = useState(false);
+  const totals = rows.reduce((acc,r)=>{
+    const n = r.food&&r.amount ? calcNutrition(r.food,r.amount) : {kcal:0,protein:0,fat:0,carb:0};
+    return {kcal:acc.kcal+n.kcal, protein:acc.protein+n.protein, fat:acc.fat+n.fat, carb:acc.carb+n.carb};
+  },{kcal:0,protein:0,fat:0,carb:0});
+  const hasData = rows.some(r=>r.food&&parseFloat(r.amount)>0);
+
+  return React.createElement("div",{className:"meal-time-block"},
+    React.createElement("div",{className:"mtb-header",onClick:()=>setCollapsed(c=>!c)},
+      React.createElement("div",{className:"mtb-title-row"},
+        React.createElement("span",{className:"mtb-icon"},timeSlot.icon),
+        React.createElement("span",{className:"mtb-label",style:{color:timeSlot.color}},timeSlot.label),
+        hasData&&React.createElement("span",{className:"mtb-kcal-badge"},Math.round(totals.kcal),"kcal")),
+      React.createElement("span",{className:"mtb-chevron"},collapsed?"›":"⌄")),
+    !collapsed&&React.createElement("div",{className:"mtb-body"},
+      rows.map((row,i)=>React.createElement(MealFoodRow,{
+        key:i, row, index:i,
+        onUpdate:(idx,patch)=>onUpdate(timeSlot.id,idx,patch),
+        onRemove:(idx)=>onRemove(timeSlot.id,idx)
+      })),
+      React.createElement("button",{className:"add-set-btn",onClick:()=>onAdd(timeSlot.id)},"＋ 食品を追加"),
+      hasData&&React.createElement("div",{className:"mtb-total-bar"},
+        React.createElement("span",{className:"mtb-total-kcal"},Math.round(totals.kcal),"kcal"),
+        React.createElement("div",{className:"mtb-macros"},
+          React.createElement("span",{className:"macro-p"},"P "+totals.protein.toFixed(1)+"g"),
+          React.createElement("span",{className:"macro-f"},"F "+totals.fat.toFixed(1)+"g"),
+          React.createElement("span",{className:"macro-c"},"C "+totals.carb.toFixed(1)+"g"))))
+  );
+}
+
+// 食事記録メイン
+function MealRecord({onSave}){
+  const initSlots = ()=>Object.fromEntries(MEAL_TIMES.map(t=>[t.id,[{food:"",amount:""}]]));
+  const [slots, setSlots] = useState(initSlots);
+  const [saved, setSaved] = useState(false);
+
+  function updateRow(timeId, idx, patch){
+    setSlots(prev=>({...prev,
+      [timeId]: prev[timeId].map((r,i)=>i===idx?{...r,...patch}:r)
+    }));
+  }
+  function addRow(timeId){
+    setSlots(prev=>({...prev,[timeId]:[...prev[timeId],{food:"",amount:""}]}));
+  }
+  function removeRow(timeId, idx){
+    setSlots(prev=>{
+      const arr=prev[timeId];
+      if(arr.length<=1)return {...prev,[timeId]:[{food:"",amount:""}]};
+      return {...prev,[timeId]:arr.filter((_,i)=>i!==idx)};
+    });
+  }
+
+  const allTotals = Object.values(slots).flat().reduce((acc,r)=>{
+    const n=r.food&&r.amount?calcNutrition(r.food,r.amount):{kcal:0,protein:0,fat:0,carb:0};
+    return {kcal:acc.kcal+n.kcal, protein:acc.protein+n.protein, fat:acc.fat+n.fat, carb:acc.carb+n.carb};
+  },{kcal:0,protein:0,fat:0,carb:0});
+
+  function handleSave(){
+    const items = [];
+    MEAL_TIMES.forEach(t=>{
+      slots[t.id].forEach(r=>{
+        if(r.food&&parseFloat(r.amount)>0){
+          const n=calcNutrition(r.food,r.amount);
+          items.push({timeId:t.id,food:r.food,amount:parseFloat(r.amount),
+            unit:FOOD_NUTRITION_DB[r.food]?.unit||"g",...n});
+        }
+      });
+    });
+    if(!items.length)return;
+    const record={id:Date.now(),date:new Date().toISOString(),items,
+      totals:{kcal:Math.round(allTotals.kcal),protein:Math.round(allTotals.protein*10)/10,
+              fat:Math.round(allTotals.fat*10)/10,carb:Math.round(allTotals.carb*10)/10}};
+    const all=loadMeals();all.push(record);saveMeals(all);onSave();
+    setSaved(true);setSlots(initSlots());
+    setTimeout(()=>setSaved(false),1800);
+  }
+
+  const hasAny = Object.values(slots).flat().some(r=>r.food&&parseFloat(r.amount)>0);
+
+  return React.createElement("div",{className:"meal-record-wrap"},
+    React.createElement("div",{className:"card",style:{marginBottom:12}},
+      React.createElement("div",{className:"card-header"},
+        React.createElement("span",{className:"card-icon meal-card-icon"},"🍽"),
+        React.createElement("span",{className:"card-title"},"食事記録")),
+      React.createElement("div",{className:"meal-day-total"},
+        React.createElement("div",{className:"mdt-left"},
+          React.createElement("span",{className:"mdt-label"},"本日の合計"),
+          React.createElement("span",{className:"mdt-kcal"},Math.round(allTotals.kcal),React.createElement("span",{className:"mdt-unit"},"kcal"))),
+        React.createElement("div",{className:"mdt-macros"},
+          React.createElement("div",{className:"mdt-macro"},
+            React.createElement("span",{className:"mdt-macro-val macro-p-val"},allTotals.protein.toFixed(1)),
+            React.createElement("span",{className:"mdt-macro-label"},"P")),
+          React.createElement("div",{className:"mdt-macro"},
+            React.createElement("span",{className:"mdt-macro-val macro-f-val"},allTotals.fat.toFixed(1)),
+            React.createElement("span",{className:"mdt-macro-label"},"F")),
+          React.createElement("div",{className:"mdt-macro"},
+            React.createElement("span",{className:"mdt-macro-val macro-c-val"},allTotals.carb.toFixed(1)),
+            React.createElement("span",{className:"mdt-macro-label"},"C"))))),
+
+    MEAL_TIMES.map(t=>React.createElement(MealTimeBlock,{
+      key:t.id, timeSlot:t,
+      rows:slots[t.id],
+      onUpdate:updateRow, onAdd:addRow, onRemove:removeRow
+    })),
+
+    React.createElement("div",{style:{margin:"0 16px 16px"}},
+      React.createElement("button",{
+        className:"save-btn"+(saved?" saved":""),
+        onClick:handleSave,
+        disabled:!hasAny
+      },saved?"✓ 保存完了！":"食事を記録する"))
+  );
+}
+
+// 食事履歴
+function MealHistoryModal({date,records,onDelete,onClose}){
+  const totals = records.reduce((acc,r)=>{
+    return {kcal:acc.kcal+r.totals.kcal, protein:acc.protein+r.totals.protein,
+            fat:acc.fat+r.totals.fat, carb:acc.carb+r.totals.carb};
+  },{kcal:0,protein:0,fat:0,carb:0});
+
+  return React.createElement("div",{className:"modal-overlay",onClick:e=>{if(e.target.classList.contains("modal-overlay"))onClose()}},
+    React.createElement("div",{className:"modal-sheet"},
+      React.createElement("div",{className:"modal-handle"}),
+      React.createElement("div",{className:"modal-head"},
+        React.createElement("div",null,
+          React.createElement("div",{className:"modal-date"},date),
+          React.createElement("div",{className:"modal-vol"},
+            React.createElement("span",{className:"modal-vol-val"},Math.round(totals.kcal)),
+            React.createElement("span",{className:"modal-vol-unit"}," kcal"),
+            React.createElement("span",{className:"modal-vol-macros"},
+              " · P"+totals.protein.toFixed(1)+" F"+totals.fat.toFixed(1)+" C"+totals.carb.toFixed(1)+"g"))),
+        React.createElement("button",{className:"modal-close",onClick:onClose},"✕")),
+      React.createElement("div",{className:"modal-body"},
+        records.map(record=>{
+          const byTime={};
+          record.items.forEach(it=>{
+            if(!byTime[it.timeId])byTime[it.timeId]=[];
+            byTime[it.timeId].push(it);
+          });
+          return React.createElement("div",{key:record.id,className:"meal-history-entry"},
+            React.createElement("button",{className:"del-btn meal-del-btn",onClick:()=>onDelete(record.id)},"✕ 削除"),
+            MEAL_TIMES.filter(t=>byTime[t.id]).map(t=>
+              React.createElement("div",{key:t.id,className:"mhe-time-group"},
+                React.createElement("div",{className:"mhe-time-label"},
+                  React.createElement("span",null,t.icon," "),
+                  React.createElement("span",{style:{color:t.color}},t.label)),
+                byTime[t.id].map((it,i)=>
+                  React.createElement("div",{key:i,className:"mhe-food-row"},
+                    React.createElement("span",{className:"mhe-food-name"},it.food),
+                    React.createElement("span",{className:"mhe-food-amount"},it.amount+(it.unit||"g")),
+                    React.createElement("span",{className:"mhe-food-kcal"},it.kcal+"kcal"),
+                    React.createElement("span",{className:"mhe-food-macros"},"P"+it.protein+" F"+it.fat+" C"+it.carb)))
+              )
+            )
+          );
+        })
+      )
+    )
+  );
+}
+
+function MealHistory({data,onDelete}){
+  const now=new Date();
+  const [year,setYear]=useState(now.getFullYear());
+  const [month,setMonth]=useState(now.getMonth());
+  const [selected,setSelected]=useState(null);
+
+  const byDate={};
+  data.forEach(r=>{
+    const d=new Date(r.date);
+    const key=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+    if(!byDate[key])byDate[key]=[];
+    byDate[key].push(r);
+  });
+
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const today=new Date();
+  const isToday=(d)=>d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
+  function prevMonth(){if(month===0){setYear(y=>y-1);setMonth(11)}else setMonth(m=>m-1)}
+  function nextMonth(){if(month===11){setYear(y=>y+1);setMonth(0)}else setMonth(m=>m+1)}
+  function getKey(d){return`${year}/${String(month+1).padStart(2,"0")}/${String(d).padStart(2,"0")}`}
+
+  const monthNames=["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const dayNames=["日","月","火","水","木","金","土"];
+  const cells=[];
+  for(let i=0;i<firstDay;i++)cells.push(null);
+  for(let d=1;d<=daysInMonth;d++)cells.push(d);
+
+  if(!data.length)return React.createElement("div",{className:"card empty-card"},
+    React.createElement("div",{className:"empty-icon"},"🍽"),
+    React.createElement("p",{className:"empty-text"},"まだ食事記録がありません"),
+    React.createElement("p",{className:"empty-sub"},"食事タブから記録を追加してみよう"));
+
+  return React.createElement("div",{className:"history-wrap"},
+    React.createElement("div",{className:"cal-header"},
+      React.createElement("button",{className:"cal-nav-btn",onClick:prevMonth},"‹"),
+      React.createElement("span",{className:"cal-month-label"},`${year}年 ${monthNames[month]}`),
+      React.createElement("button",{className:"cal-nav-btn",onClick:nextMonth},"›")),
+    React.createElement("div",{className:"cal-grid"},
+      dayNames.map(d=>React.createElement("div",{key:d,className:"cal-dow"},d)),
+      cells.map((d,i)=>{
+        if(d===null)return React.createElement("div",{key:`e${i}`,className:"cal-cell cal-empty"});
+        const key=getKey(d);
+        const recs=byDate[key];
+        const hasRec=!!recs;
+        const active=selected===key;
+        const kcalTotal = recs ? recs.reduce((s,r)=>s+r.totals.kcal,0) : 0;
+        return React.createElement("div",{
+          key:d,
+          className:`cal-cell${hasRec?" cal-has-rec cal-meal-rec":""}${isToday(d)?" cal-today":""}${active?" cal-selected":""}`,
+          onClick:()=>{if(hasRec)setSelected(key)}},
+          React.createElement("span",{className:"cal-day-num"},d),
+          hasRec&&React.createElement("div",{className:"cal-dot meal-cal-dot"}),
+          hasRec&&React.createElement("div",{className:"cal-cell-kcal"},Math.round(kcalTotal)));
+      })),
+    React.createElement("div",{className:"cal-legend"},
+      React.createElement("span",{className:"cal-legend-label"},"食事記録あり"),
+      React.createElement("div",{className:"cal-legend-item"},
+        React.createElement("div",{className:"cal-dot meal-cal-dot"}),
+        React.createElement("span",null,"kcal表示"))),
+    selected&&byDate[selected]&&React.createElement(MealHistoryModal,{
+      date:selected, records:byDate[selected],
+      onDelete:(id)=>{onDelete(id);if(!byDate[selected]||byDate[selected].length<=1)setSelected(null)},
+      onClose:()=>setSelected(null)
+    })
+  );
+}
+
+// 栄養グラフ
+function MealCharts({data}){
+  if(!data.length)return React.createElement("div",{className:"card empty-card"},
+    React.createElement("div",{className:"empty-icon"},"📊"),
+    React.createElement("p",{className:"empty-text"},"データがありません"),
+    React.createElement("p",{className:"empty-sub"},"食事を記録するとグラフが表示されます"));
+
+  // 日別データ
+  const byDate={};
+  data.forEach(r=>{
+    const d=new Date(r.date);
+    const key=`${d.getMonth()+1}/${d.getDate()}`;
+    if(!byDate[key]){byDate[key]={date:key,kcal:0,protein:0,fat:0,carb:0};}
+    byDate[key].kcal    += r.totals.kcal;
+    byDate[key].protein += r.totals.protein;
+    byDate[key].fat     += r.totals.fat;
+    byDate[key].carb    += r.totals.carb;
+  });
+  const chartData=Object.values(byDate).slice(-14).map(d=>({
+    ...d,
+    kcal:Math.round(d.kcal),
+    protein:Math.round(d.protein*10)/10,
+    fat:Math.round(d.fat*10)/10,
+    carb:Math.round(d.carb*10)/10,
+  }));
+
+  // 直近1日の PFCドーナツ用
+  const latest = chartData[chartData.length-1]||{protein:0,fat:0,carb:0};
+  const pfcTotal = latest.protein*4 + latest.fat*9 + latest.carb*4;
+  const pieData = pfcTotal>0 ? [
+    {name:"タンパク質",value:Math.round(latest.protein*4/pfcTotal*100),color:"#4fc3f7"},
+    {name:"脂質",      value:Math.round(latest.fat*9/pfcTotal*100),    color:"#f06090"},
+    {name:"炭水化物",  value:Math.round(latest.carb*4/pfcTotal*100),   color:"#60d080"},
+  ] : [];
+
+  const tooltipStyle={contentStyle:{background:"#252540",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}};
+  const gridStyle={strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"};
+  const tickStyle={fontSize:11,fill:"#888"};
+
+  return React.createElement("div",{className:"charts-wrap"},
+    // PFC内訳（直近日）
+    pfcTotal>0&&React.createElement("div",{className:"card chart-card"},
+      React.createElement("div",{className:"chart-title"},"PFC比率 ",React.createElement("span",{className:"chart-unit"},"(直近の記録)")),
+      React.createElement("div",{className:"pfc-layout"},
+        React.createElement(ResponsiveContainer,{width:160,height:160},
+          React.createElement(PieChart,null,
+            React.createElement(Pie,{data:pieData,cx:"50%",cy:"50%",
+              innerRadius:46,outerRadius:72,paddingAngle:3,dataKey:"value"},
+              pieData.map((e,i)=>React.createElement(Cell,{key:i,fill:e.color}))))),
+        React.createElement("div",{className:"pfc-legend"},
+          pieData.map(e=>React.createElement("div",{key:e.name,className:"pfc-legend-item"},
+            React.createElement("span",{className:"pfc-dot",style:{background:e.color}}),
+            React.createElement("span",{className:"pfc-legend-name"},e.name),
+            React.createElement("span",{className:"pfc-legend-val"},e.value+"%")))))),
+
+    // カロリー推移
+    React.createElement("div",{className:"card chart-card"},
+      React.createElement("div",{className:"chart-title"},"カロリー推移 ",React.createElement("span",{className:"chart-unit"},"(kcal)")),
+      React.createElement(ResponsiveContainer,{width:"100%",height:200},
+        React.createElement(BarChart,{data:chartData,margin:{top:5,right:16,left:-10,bottom:0}},
+          React.createElement(CartesianGrid,gridStyle),
+          React.createElement(XAxis,{dataKey:"date",tick:tickStyle}),
+          React.createElement(YAxis,{tick:tickStyle}),
+          React.createElement(Tooltip,tooltipStyle),
+          React.createElement(Bar,{dataKey:"kcal",fill:"#f0b030",radius:[4,4,0,0]})))),
+
+    // PFCグラム推移
+    React.createElement("div",{className:"card chart-card"},
+      React.createElement("div",{className:"chart-title"},"PFCグラム推移 ",React.createElement("span",{className:"chart-unit"},"(g)")),
+      React.createElement(ResponsiveContainer,{width:"100%",height:200},
+        React.createElement(LineChart,{data:chartData,margin:{top:5,right:16,left:-10,bottom:0}},
+          React.createElement(CartesianGrid,gridStyle),
+          React.createElement(XAxis,{dataKey:"date",tick:tickStyle}),
+          React.createElement(YAxis,{tick:tickStyle}),
+          React.createElement(Tooltip,tooltipStyle),
+          React.createElement(Line,{type:"monotone",dataKey:"protein",stroke:"#4fc3f7",strokeWidth:2,dot:{r:3},name:"P"}),
+          React.createElement(Line,{type:"monotone",dataKey:"fat",    stroke:"#f06090",strokeWidth:2,dot:{r:3},name:"F"}),
+          React.createElement(Line,{type:"monotone",dataKey:"carb",   stroke:"#60d080",strokeWidth:2,dot:{r:3},name:"C"})))));
+}
+
+// ─── Main App ───
 function App(){
   const [tab,setTab]=useState("record");
-  const [data,setData]=useState(loadData);
-  function refresh(){setData(loadData())}
-  function handleDelete(id){const next=data.filter(r=>r.id!==id);saveData(next);setData(next)}
-  const tabs=[{id:"record",label:"記録",icon:"✚"},{id:"history",label:"カレンダー",icon:"📅"},{id:"chart",label:"グラフ",icon:"📈"}];
+  const [subTab,setSubTab]=useState("meal"); // "meal" | "history" | "chart" for meal section
+  const [workoutData,setWorkoutData]=useState(loadWorkout);
+  const [mealData,setMealData]=useState(loadMeals);
+
+  function refreshWorkout(){setWorkoutData(loadWorkout())}
+  function refreshMeal(){setMealData(loadMeals())}
+  function handleDeleteWorkout(id){const next=workoutData.filter(r=>r.id!==id);saveWorkout(next);setWorkoutData(next)}
+  function handleDeleteMeal(id){const next=mealData.filter(r=>r.id!==id);saveMeals(next);setMealData(next)}
+
+  const mainTabs=[
+    {id:"record",  label:"記録",   icon:"✚"},
+    {id:"history", label:"履歴",   icon:"📅"},
+    {id:"chart",   label:"グラフ", icon:"📈"},
+    {id:"meal",    label:"食事",   icon:"🍽"},
+  ];
+
+  const mealSubTabs=[
+    {id:"meal",    label:"記録",   icon:"✏️"},
+    {id:"mhist",   label:"カレンダー", icon:"📅"},
+    {id:"mchart",  label:"グラフ", icon:"📊"},
+  ];
+
   return React.createElement(React.Fragment,null,
     React.createElement("style",null,`
       .app{max-width:480px;margin:0 auto;padding-bottom:88px}
@@ -292,6 +762,7 @@ function App(){
       .card{background:#22223a;border:1px solid #2e2e48;border-radius:14px;padding:20px;margin:0 16px 16px}
       .card-header{display:flex;align-items:center;gap:8px;margin-bottom:18px}
       .card-icon{width:28px;height:28px;background:#e8a020;color:#0d0d14;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:bold;flex-shrink:0}
+      .meal-card-icon{background:#2a3a2a;}
       .card-title{font-size:.95rem;font-weight:700;color:#ddd;letter-spacing:.5px}
       .field-group{display:flex;flex-direction:column;gap:5px}
       .field-label{font-size:.72rem;color:#aaa;letter-spacing:.5px}
@@ -314,16 +785,15 @@ function App(){
       .set-del-btn{background:none;border:none;color:#2a2a3a;cursor:pointer;font-size:.7rem;padding:4px;border-radius:4px;transition:color .2s}
       .set-del-btn:hover{color:#cc4444}
       .add-set-btn{width:100%;background:transparent;border:1px dashed #252535;border-radius:8px;color:#555;padding:9px;font-size:.82rem;font-family:inherit;cursor:pointer;margin:4px 0 14px;transition:all .2s;letter-spacing:.5px}
-      .add-set-btn:hover{border-color:#e8a020;color:#e8a020}
+      .add-set-btn:hover{border-color:#60d080;color:#60d080}
       .total-bar{display:flex;justify-content:space-between;align-items:center;background:#13132a;border:1px solid #2e2e48;border-radius:10px;padding:12px 16px;margin-bottom:16px}
       .total-label{font-size:.8rem;color:#777}
       .total-value{font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:#e8a020;letter-spacing:1px}
       .save-btn{width:100%;background:#e8a020;color:#0d0d14;border:none;border-radius:10px;padding:13px;font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:all .2s}
       .save-btn:hover{background:#f0b030}
       .save-btn.saved{background:#2a7a2a;color:#7fff7f}
+      .save-btn:disabled{background:#2a2a3a;color:#555;cursor:not-allowed}
       .history-wrap{padding:0 16px}
-      .day-group{margin-bottom:20px}
-      .day-label{font-size:.72rem;color:#888;letter-spacing:1px;margin-bottom:8px;padding-left:4px;text-transform:uppercase}
       .history-card{background:#22223a;border:1px solid #2e2e48;border-radius:12px;padding:12px 14px;margin-bottom:8px}
       .hc-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
       .hc-exercise{font-size:.9rem;font-weight:700;color:#ddd;flex:1}
@@ -348,25 +818,27 @@ function App(){
       .empty-text{font-size:.9rem;color:#888;margin-bottom:6px}
       .empty-sub{font-size:.75rem;color:#666}
       .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#181830;border-top:1px solid #2e2e48;display:flex;justify-content:center}
-      .nav-btn{flex:1;max-width:160px;background:none;border:none;color:#666;padding:12px 0;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s}
+      .nav-btn{flex:1;max-width:120px;background:none;border:none;color:#666;padding:12px 0;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s}
       .nav-btn.active{color:#e8a020}
+      .nav-btn.meal-active{color:#60d080}
       .nav-icon{font-size:1.2rem}
       .nav-label{font-size:.65rem;letter-spacing:.5px}
       ::-webkit-scrollbar{width:4px}
       ::-webkit-scrollbar-track{background:transparent}
       ::-webkit-scrollbar-thumb{background:#222;border-radius:2px}
-      /* ── Calendar ── */
+      /* Calendar */
       .cal-header{display:flex;align-items:center;justify-content:space-between;padding:0 16px 14px}
       .cal-month-label{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:2px;color:#eeeef8}
       .cal-nav-btn{background:none;border:1px solid #2e2e48;border-radius:8px;color:#aaa;width:36px;height:36px;font-size:1.3rem;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center}
       .cal-nav-btn:hover{border-color:#e8a020;color:#e8a020}
       .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:0 16px}
       .cal-dow{text-align:center;font-size:.62rem;color:#555;padding:4px 0;letter-spacing:.5px}
-      .cal-cell{aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:default;transition:all .2s;position:relative;background:#1a1a2a}
+      .cal-cell{aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:default;transition:all .2s;position:relative;background:#1a1a2a}
       .cal-empty{background:transparent}
       .cal-day-num{font-size:.78rem;color:#666;line-height:1}
       .cal-has-rec{cursor:pointer;background:#22223a;border:1px solid #2e2e48}
       .cal-has-rec:hover{border-color:#e8a020;background:#252540}
+      .cal-meal-rec:hover{border-color:#60d080!important}
       .cal-today .cal-day-num{color:#eeeef8;font-weight:700}
       .cal-today{border:1px solid #3a3a5a!important}
       .cal-selected{border-color:#e8a020!important;background:#2a2210!important}
@@ -374,10 +846,12 @@ function App(){
       .cal-dot-1{background:#c87820;opacity:.7}
       .cal-dot-2{background:#e8a020;opacity:.85}
       .cal-dot-3{background:#f0c040}
+      .meal-cal-dot{background:#60d080;opacity:.9;width:5px;height:5px}
+      .cal-cell-kcal{font-size:.5rem;color:#60d080;line-height:1;white-space:nowrap}
       .cal-legend{display:flex;align-items:center;gap:10px;padding:10px 16px 0;flex-wrap:wrap}
       .cal-legend-label{font-size:.65rem;color:#555;margin-right:2px}
       .cal-legend-item{display:flex;align-items:center;gap:4px;font-size:.65rem;color:#666}
-      /* ── Modal ── */
+      /* Modal */
       .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;align-items:flex-end;animation:fadeIn .2s ease}
       @keyframes fadeIn{from{opacity:0}to{opacity:1}}
       .modal-sheet{width:100%;max-width:480px;margin:0 auto;background:#1e1e32;border-radius:20px 20px 0 0;border-top:1px solid #2e2e48;max-height:82vh;display:flex;flex-direction:column;animation:slideUp .25s cubic-bezier(.32,1,.5,1)}
@@ -385,25 +859,115 @@ function App(){
       .modal-handle{width:36px;height:4px;background:#333;border-radius:2px;margin:12px auto 0}
       .modal-head{display:flex;align-items:flex-start;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid #2e2e48;flex-shrink:0}
       .modal-date{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#ddd}
-      .modal-vol{font-size:.72rem;color:#888;margin-top:2px}
+      .modal-vol{font-size:.72rem;color:#888;margin-top:2px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
       .modal-vol-val{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#e8a020;letter-spacing:1px}
       .modal-vol-unit{color:#666}
+      .modal-vol-macros{color:#777;font-size:.68rem}
       .modal-close{background:none;border:1px solid #2e2e48;border-radius:8px;color:#888;width:32px;height:32px;font-size:.85rem;cursor:pointer;flex-shrink:0;transition:all .2s}
       .modal-close:hover{border-color:#cc4444;color:#cc4444}
       .modal-body{overflow-y:auto;padding:14px 16px 28px;display:flex;flex-direction:column;gap:0}
+      /* Meal Sub Tab */
+      .meal-sub-tabs{display:flex;gap:0;margin:0 16px 14px;background:#181830;border-radius:10px;padding:3px}
+      .meal-sub-tab{flex:1;background:none;border:none;color:#666;padding:8px 0;font-family:inherit;font-size:.75rem;cursor:pointer;border-radius:8px;transition:all .2s;letter-spacing:.3px}
+      .meal-sub-tab.active{background:#22223a;color:#60d080;font-weight:700}
+      /* Meal Record */
+      .meal-record-wrap{}
+      .meal-day-total{display:flex;align-items:center;justify-content:space-between;background:#13132a;border-radius:10px;padding:14px 16px;margin-bottom:4px}
+      .mdt-left{display:flex;flex-direction:column;gap:2px}
+      .mdt-label{font-size:.65rem;color:#666;letter-spacing:.5px}
+      .mdt-kcal{font-family:'Bebas Neue',sans-serif;font-size:2rem;color:#f0b030;letter-spacing:1px;line-height:1}
+      .mdt-unit{font-size:.9rem;color:#a07820;margin-left:3px}
+      .mdt-macros{display:flex;gap:12px}
+      .mdt-macro{display:flex;flex-direction:column;align-items:center;gap:1px}
+      .mdt-macro-val{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:.5px;line-height:1}
+      .mdt-macro-label{font-size:.58rem;color:#666;letter-spacing:.5px}
+      .macro-p-val{color:#4fc3f7}
+      .macro-f-val{color:#f06090}
+      .macro-c-val{color:#60d080}
+      /* Meal Time Block */
+      .meal-time-block{margin:0 16px 8px;background:#22223a;border:1px solid #2e2e48;border-radius:12px;overflow:hidden}
+      .mtb-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer;transition:background .15s}
+      .mtb-header:hover{background:#252545}
+      .mtb-title-row{display:flex;align-items:center;gap:8px;flex:1}
+      .mtb-icon{font-size:1rem}
+      .mtb-label{font-size:.88rem;font-weight:700;letter-spacing:.3px}
+      .mtb-kcal-badge{font-family:'Bebas Neue',sans-serif;font-size:.9rem;color:#aaa;letter-spacing:.5px;background:#1a1a2a;border-radius:6px;padding:2px 7px}
+      .mtb-chevron{color:#444;font-size:.9rem;flex-shrink:0;margin-left:4px}
+      .mtb-body{padding:0 12px 12px;border-top:1px solid #2a2a42}
+      /* Meal food row */
+      .meal-food-row{margin-top:10px;background:#1a1a2a;border-radius:8px;padding:10px 10px 8px}
+      .meal-food-row-top{display:flex;align-items:center;gap:8px}
+      .meal-food-name-wrap{flex:1;min-width:0}
+      .meal-food-amount-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}
+      .meal-amount-input{width:64px!important;text-align:center;padding:9px 6px!important}
+      .meal-unit-badge{font-size:.68rem;color:#60d080;background:#1e3a1e;border-radius:4px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+      .meal-food-nutrition{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid #252535;flex-wrap:wrap}
+      .mn-kcal{font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:#f0b030;letter-spacing:.5px}
+      .mn-sep{color:#333}
+      .mn-p{font-size:.72rem;color:#4fc3f7}
+      .mn-f{font-size:.72rem;color:#f06090}
+      .mn-c{font-size:.72rem;color:#60d080}
+      .mtb-total-bar{display:flex;align-items:center;justify-content:space-between;background:#13132a;border-radius:8px;padding:10px 12px;margin-top:8px}
+      .mtb-total-kcal{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:#f0b030;letter-spacing:.5px}
+      .mtb-macros{display:flex;gap:8px}
+      .macro-p{font-size:.72rem;color:#4fc3f7}
+      .macro-f{font-size:.72rem;color:#f06090}
+      .macro-c{font-size:.72rem;color:#60d080}
+      /* Meal history modal */
+      .meal-history-entry{background:#1a1a2a;border-radius:10px;padding:12px;margin-bottom:10px;position:relative}
+      .meal-del-btn{position:absolute;top:10px;right:10px;font-size:.7rem;color:#444;background:none;border:1px solid #2e2e48;border-radius:6px;padding:3px 7px;cursor:pointer;transition:all .2s}
+      .meal-del-btn:hover{border-color:#cc4444;color:#cc4444}
+      .mhe-time-group{margin-bottom:10px}
+      .mhe-time-label{font-size:.78rem;font-weight:700;color:#aaa;margin-bottom:6px;display:flex;align-items:center;gap:4px}
+      .mhe-food-row{display:grid;grid-template-columns:1fr 48px 52px 80px;gap:4px;align-items:center;padding:4px 0;border-bottom:1px solid #22223a}
+      .mhe-food-row:last-child{border-bottom:none}
+      .mhe-food-name{font-size:.8rem;color:#ccc}
+      .mhe-food-amount{font-size:.72rem;color:#777;text-align:center}
+      .mhe-food-kcal{font-family:'Bebas Neue',sans-serif;font-size:.9rem;color:#f0b030;text-align:right}
+      .mhe-food-macros{font-size:.6rem;color:#666;text-align:right}
+      /* PFC Pie */
+      .pfc-layout{display:flex;align-items:center;gap:16px}
+      .pfc-legend{display:flex;flex-direction:column;gap:8px;flex:1}
+      .pfc-legend-item{display:flex;align-items:center;gap:8px}
+      .pfc-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+      .pfc-legend-name{font-size:.78rem;color:#aaa;flex:1}
+      .pfc-legend-val{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#ddd;letter-spacing:.5px}
     `),
     React.createElement("div",{className:"app"},
       React.createElement("div",{className:"header"},
         React.createElement("span",{className:"header-logo"},"IRON LOG"),
-        React.createElement("span",{className:"header-sub"},"筋トレ記録"),
-        React.createElement("span",{className:"header-count"},data.length+" records")),
-      tab==="record"&&React.createElement(RecordForm,{onSave:refresh}),
-      tab==="history"&&React.createElement(History,{data,onDelete:handleDelete}),
-      tab==="chart"&&React.createElement(Charts,{data})),
+        React.createElement("span",{className:"header-sub"},tab==="meal"?"食事管理":"筋トレ記録"),
+        React.createElement("span",{className:"header-count"},
+          tab==="meal" ? mealData.length+" meals" : workoutData.length+" records")),
+
+      // Workout tabs
+      tab==="record"&&React.createElement(RecordForm,{onSave:refreshWorkout}),
+      tab==="history"&&React.createElement(History,{data:workoutData,onDelete:handleDeleteWorkout}),
+      tab==="chart"&&React.createElement(Charts,{data:workoutData}),
+
+      // Meal tabs
+      tab==="meal"&&React.createElement(React.Fragment,null,
+        React.createElement("div",{className:"meal-sub-tabs"},
+          mealSubTabs.map(t=>React.createElement("button",{
+            key:t.id,
+            className:"meal-sub-tab"+(subTab===t.id?" active":""),
+            onClick:()=>setSubTab(t.id)
+          },t.icon+" "+t.label))),
+        subTab==="meal"&&React.createElement(MealRecord,{onSave:refreshMeal}),
+        subTab==="mhist"&&React.createElement(MealHistory,{data:mealData,onDelete:handleDeleteMeal}),
+        subTab==="mchart"&&React.createElement(MealCharts,{data:mealData})
+      )
+    ),
+
     React.createElement("nav",{className:"bottom-nav"},
-      tabs.map(t=>React.createElement("button",{key:t.id,className:"nav-btn"+(tab===t.id?" active":""),onClick:()=>setTab(t.id)},
+      mainTabs.map(t=>React.createElement("button",{
+        key:t.id,
+        className:"nav-btn"+(tab===t.id?(t.id==="meal"?" active meal-active":" active"):""),
+        onClick:()=>{setTab(t.id);if(t.id==="meal")setSubTab("meal")}
+      },
         React.createElement("span",{className:"nav-icon"},t.icon),
-        React.createElement("span",{className:"nav-label"},t.label)))));
+        React.createElement("span",{className:"nav-label"},t.label))))
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
