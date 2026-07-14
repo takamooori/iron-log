@@ -22,10 +22,10 @@
 <body>
   <div id="root"><div id="loading">IRON LOG</div></div>
 
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
-  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-is/18.3.1/umd/react-is.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/recharts/3.2.1/Recharts.min.js"></script>
 
   <script>
 const { useState, useEffect, useRef, useMemo } = React;
@@ -50,6 +50,42 @@ function loadMeals(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_MEAL
 
 function formatDate(iso){const d=new Date(iso);return`${d.getMonth()+1}/${d.getDate()}`}
 function formatDateFull(iso){const d=new Date(iso);return`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`}
+
+// ─── 体組成データ ───
+const STORAGE_KEY_BODY = "body_log_v1";
+const STORAGE_KEY_BODY_PROFILE = "body_profile_v1"; // {height}
+function loadBody(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_BODY)||"[]")}catch{return[]}}
+function saveBody(d){localStorage.setItem(STORAGE_KEY_BODY,JSON.stringify(d))}
+function loadBodyProfile(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_BODY_PROFILE)||"{}")}catch{return{}}}
+function saveBodyProfile(p){localStorage.setItem(STORAGE_KEY_BODY_PROFILE,JSON.stringify(p))}
+function dateToStr(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
+function todayStr(){return dateToStr(new Date())}
+function fmtMD(dateStr){const p=dateStr.split("-");return`${parseInt(p[1])}/${parseInt(p[2])}`}
+function daysBeforeStr(baseDateStr,days){const d=new Date(baseDateStr+"T00:00:00");d.setDate(d.getDate()-days);return dateToStr(d)}
+
+// 最新値と「N日前(以前で最も近い記録)」の差分。記録が足りなければ最古と比較、それも無ければnull
+function bodyDelta(entries,getVal,daysBefore){
+  const withVal=entries.filter(e=>typeof getVal(e)==="number"&&!isNaN(getVal(e))).sort((a,b)=>a.date<b.date?-1:1);
+  if(withVal.length<2)return null;
+  const latest=withVal[withVal.length-1];
+  const targetStr=daysBeforeStr(latest.date,daysBefore);
+  let past=null;
+  for(let i=withVal.length-2;i>=0;i--){if(withVal[i].date<=targetStr){past=withVal[i];break}}
+  if(!past)past=withVal[0];
+  if(past.date===latest.date)return null;
+  const from=getVal(past),to=getVal(latest);
+  return {diff:to-from,pct:from!==0?(to-from)/from*100:0,fromDate:past.date};
+}
+
+// 日付ベースの移動平均(直近windowDays日間の平均)
+function withMovingAvg(points,windowDays){
+  return points.map(p=>{
+    const fromStr=daysBeforeStr(p.date,windowDays-1);
+    const win=points.filter(q=>q.date>=fromStr&&q.date<=p.date);
+    const avg=win.reduce((s,q)=>s+q.value,0)/win.length;
+    return {...p,avg:Math.round(avg*100)/100};
+  });
+}
 
 // ─── e1RM (Epley式: w × (1 + reps/30)) ───
 function e1rm(weight,reps){
@@ -186,8 +222,8 @@ function BackupCard({onImported}){
   const fileRef=useRef(null);
   const [msg,setMsg]=useState("");
   function doExport(){
-    const payload={app:"iron-log",version:1,exportedAt:new Date().toISOString(),
-      workout:loadWorkout(),meal:loadMeals()};
+    const payload={app:"iron-log",version:2,exportedAt:new Date().toISOString(),
+      workout:loadWorkout(),body:loadBody(),bodyProfile:loadBodyProfile(),meal:loadMeals()};
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
@@ -209,8 +245,18 @@ function BackupCard({onImported}){
         const ids=new Set(cur.map(r=>r.id));
         const added=incoming.filter(r=>r&&r.id!=null&&!ids.has(r.id));
         const merged=[...cur,...added].sort((a,b)=>new Date(a.date)-new Date(b.date));
-        saveWorkout(merged);onImported();
-        setMsg(`インポート完了(${added.length}件追加 / 重複${incoming.length-added.length}件スキップ)`);
+        saveWorkout(merged);
+        // 体組成データ(日付キーでマージ、既存日はスキップ)
+        let bodyAdded=0;
+        if(Array.isArray(obj.body)){
+          const curBody=loadBody();
+          const dates=new Set(curBody.map(e=>e.date));
+          const newEntries=obj.body.filter(e=>e&&e.date&&typeof e.weight==="number"&&!dates.has(e.date));
+          if(newEntries.length){saveBody([...curBody,...newEntries].sort((a,b)=>a.date<b.date?-1:1));bodyAdded=newEntries.length}
+        }
+        if(obj.bodyProfile&&obj.bodyProfile.height&&!loadBodyProfile().height)saveBodyProfile(obj.bodyProfile);
+        onImported();
+        setMsg(`インポート完了(筋トレ${added.length}件・体重${bodyAdded}件追加 / 重複はスキップ)`);
       }catch(err){setMsg("読み込み失敗: "+err.message)}
       setTimeout(()=>setMsg(""),4000);
       e.target.value="";
@@ -413,11 +459,204 @@ function Charts({data}){
     React.createElement("p",{className:"chart-note"},"推定1RM = 重量 × (1 + 回数÷30)。同じ重量でも回数が伸びれば数値が上がります。"));
 }
 
+// ─── 体重タブ ───
+const BODY_METRICS=[
+  {id:"weight",label:"体重",unit:"kg"},
+  {id:"fat",label:"体脂肪率",unit:"%"},
+  {id:"muscle",label:"筋肉量",unit:"kg"},
+  {id:"bmi",label:"BMI",unit:""},
+];
+const BODY_PERIODS=[{id:30,label:"30日"},{id:90,label:"90日"},{id:0,label:"全期間"}];
+
+function DeltaChip({label,delta,unit}){
+  if(!delta)return React.createElement("div",{className:"delta-chip"},
+    React.createElement("span",{className:"delta-label"},label),
+    React.createElement("span",{className:"delta-none"},"—"));
+  const up=delta.diff>0,flat=Math.abs(delta.diff)<0.005;
+  const cls=flat?"delta-flat":up?"delta-up":"delta-down";
+  const sign=up?"+":"";
+  return React.createElement("div",{className:"delta-chip"},
+    React.createElement("span",{className:"delta-label"},label),
+    React.createElement("span",{className:"delta-val "+cls},
+      flat?"±0":`${sign}${delta.diff.toFixed(1)}${unit}`,
+      !flat&&React.createElement("span",{className:"delta-pct"},` (${sign}${delta.pct.toFixed(1)}%)`)));
+}
+
+function BodyTab({entries,onChange}){
+  const sorted=[...entries].sort((a,b)=>a.date<b.date?-1:1);
+  const latest=sorted[sorted.length-1]||null;
+  const [form,setForm]=useState(()=>({date:todayStr(),
+    weight:latest?String(latest.weight):"",fat:"",muscle:""}));
+  const [height,setHeight]=useState(()=>{const p=loadBodyProfile();return p.height?String(p.height):""});
+  const [metric,setMetric]=useState("weight");
+  const [period,setPeriod]=useState(30);
+  const [msg,setMsg]=useState("");
+
+  const h=parseFloat(height);
+  const getVal=(e)=>{
+    if(metric==="bmi")return(h>0&&typeof e.weight==="number")?Math.round(e.weight/((h/100)**2)*10)/10:NaN;
+    return e[metric];
+  };
+  const metricInfo=BODY_METRICS.find(m=>m.id===metric);
+
+  // グラフ用データ(期間フィルタ→移動平均)
+  const cutoff=period>0?daysBeforeStr(todayStr(),period-1):null;
+  const points=sorted
+    .map(e=>({date:e.date,value:getVal(e)}))
+    .filter(p=>typeof p.value==="number"&&!isNaN(p.value))
+    .filter(p=>!cutoff||p.date>=cutoff);
+  const chartData=withMovingAvg(points,7).map(p=>({date:fmtMD(p.date),[metricInfo.label]:p.value,"7日平均":p.avg}));
+  const periodDelta=points.length>=2?{
+    diff:points[points.length-1].value-points[0].value,
+    pct:points[0].value!==0?(points[points.length-1].value-points[0].value)/points[0].value*100:0
+  }:null;
+
+  const bmiNow=(h>0&&latest)?(latest.weight/((h/100)**2)).toFixed(1):null;
+  const d7=bodyDelta(sorted,e=>e.weight,7);
+  const d30=bodyDelta(sorted,e=>e.weight,30);
+
+  function num(v){const n=parseFloat(v);return(v!==""&&!isNaN(n))?Math.round(n*100)/100:null}
+  function handleSave(){
+    const w=parseFloat(form.weight);
+    if(!(w>0))return;
+    const entry={id:Date.now(),date:form.date,weight:Math.round(w*100)/100,fat:num(form.fat),muscle:num(form.muscle)};
+    const cur=loadBody();
+    const exists=cur.find(e=>e.date===form.date);
+    const next=(exists?cur.map(e=>e.date===form.date?{...entry,id:e.id}:e):[...cur,entry])
+      .sort((a,b)=>a.date<b.date?-1:1);
+    saveBody(next);onChange(next);
+    setForm(f=>({...f,fat:"",muscle:""}));
+    setMsg(exists?"✓ 上書き保存しました":"✓ 保存しました");setTimeout(()=>setMsg(""),1800);
+  }
+  function handleDelete(date){
+    if(!confirm(fmtMD(date)+" の記録を削除しますか？"))return;
+    const next=loadBody().filter(e=>e.date!==date);
+    saveBody(next);onChange(next);
+  }
+  function handleEdit(e){
+    setForm({date:e.date,weight:String(e.weight),fat:e.fat!=null?String(e.fat):"",muscle:e.muscle!=null?String(e.muscle):""});
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+  function handleHeightBlur(){
+    const v=parseFloat(height);
+    if(v>0)saveBodyProfile({height:v});
+  }
+
+  const recent=[...sorted].reverse().slice(0,7);
+  const tooltipStyle={contentStyle:{background:"#252540",border:"1px solid #333",borderRadius:8},labelStyle:{color:"#ccc"}};
+  const gridStyle={strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.07)"};
+  const tickStyle={fontSize:11,fill:"#888"};
+
+  return React.createElement("div",{className:"body-wrap"},
+    // サマリー
+    latest&&React.createElement("div",{className:"card body-summary"},
+      React.createElement("div",{className:"bs-main-row"},
+        React.createElement("div",null,
+          React.createElement("div",{className:"bs-label"},"現在の体重"),
+          React.createElement("div",{className:"bs-weight"},latest.weight.toFixed(1),
+            React.createElement("span",{className:"bs-unit"},"kg")),
+          React.createElement("div",{className:"bs-date"},fmtMD(latest.date)+" 時点")),
+        React.createElement("div",{className:"bs-side"},
+          bmiNow&&React.createElement("div",{className:"bs-side-item"},
+            React.createElement("span",{className:"bs-side-label"},"BMI"),
+            React.createElement("span",{className:"bs-side-val"},bmiNow)),
+          latest.fat!=null&&React.createElement("div",{className:"bs-side-item"},
+            React.createElement("span",{className:"bs-side-label"},"体脂肪"),
+            React.createElement("span",{className:"bs-side-val"},latest.fat.toFixed(1)+"%")),
+          latest.muscle!=null&&React.createElement("div",{className:"bs-side-item"},
+            React.createElement("span",{className:"bs-side-label"},"筋肉量"),
+            React.createElement("span",{className:"bs-side-val"},latest.muscle.toFixed(1)+"kg")))),
+      React.createElement("div",{className:"delta-row"},
+        React.createElement(DeltaChip,{label:"7日前比",delta:d7,unit:"kg"}),
+        React.createElement(DeltaChip,{label:"30日前比",delta:d30,unit:"kg"}))),
+    // 入力
+    React.createElement("div",{className:"card"},
+      React.createElement("div",{className:"card-header"},
+        React.createElement("span",{className:"card-icon"},"⚖"),
+        React.createElement("span",{className:"card-title"},"今日の記録")),
+      React.createElement("div",{className:"body-form-row"},
+        React.createElement("div",{className:"field-group",style:{flex:1}},
+          React.createElement("label",{className:"field-label"},"日付"),
+          React.createElement("input",{className:"field-input",type:"date",value:form.date,max:todayStr(),
+            onChange:e=>setForm(f=>({...f,date:e.target.value}))}))),
+      React.createElement("div",{className:"field-group",style:{marginTop:12}},
+        React.createElement("label",{className:"field-label"},"体重 ",React.createElement("span",{className:"unit"},"kg")),
+        React.createElement("div",{className:"stepper-row"},
+          React.createElement("button",{className:"step-btn",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,-0.5)}))},"−0.5"),
+          React.createElement("button",{className:"step-btn",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,-0.1)}))},"−0.1"),
+          React.createElement("input",{className:"field-input weight-input",type:"number",inputMode:"decimal",min:"0",step:"0.1",placeholder:"65.0",value:form.weight,
+            onChange:e=>setForm(f=>({...f,weight:e.target.value}))}),
+          React.createElement("button",{className:"step-btn step-plus",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,0.1)}))},"+0.1"),
+          React.createElement("button",{className:"step-btn step-plus",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,0.5)}))},"+0.5"))),
+      React.createElement("div",{className:"body-form-row",style:{marginTop:12}},
+        React.createElement("div",{className:"field-group",style:{flex:1}},
+          React.createElement("label",{className:"field-label"},"体脂肪率 ",React.createElement("span",{className:"unit"},"% 任意")),
+          React.createElement("input",{className:"field-input",type:"number",inputMode:"decimal",min:"0",step:"0.1",placeholder:"—",value:form.fat,
+            onChange:e=>setForm(f=>({...f,fat:e.target.value}))})),
+        React.createElement("div",{className:"field-group",style:{flex:1}},
+          React.createElement("label",{className:"field-label"},"筋肉量 ",React.createElement("span",{className:"unit"},"kg 任意")),
+          React.createElement("input",{className:"field-input",type:"number",inputMode:"decimal",min:"0",step:"0.1",placeholder:"—",value:form.muscle,
+            onChange:e=>setForm(f=>({...f,muscle:e.target.value}))}))),
+      React.createElement("div",{className:"body-form-row",style:{marginTop:12,alignItems:"center"}},
+        React.createElement("div",{className:"field-group",style:{flex:1}},
+          React.createElement("label",{className:"field-label"},"身長 ",React.createElement("span",{className:"unit"},"cm・BMI計算用")),
+          React.createElement("input",{className:"field-input",type:"number",inputMode:"decimal",min:"0",step:"0.1",placeholder:"170",value:height,
+            onChange:e=>setHeight(e.target.value),onBlur:handleHeightBlur}))),
+      React.createElement("button",{className:"save-btn"+(msg?" saved":""),style:{marginTop:16},onClick:handleSave},msg||"保存する"),
+      React.createElement("p",{className:"body-note"},"同じ日付で保存すると上書きされます")),
+    // グラフ
+    sorted.length>0&&React.createElement(React.Fragment,null,
+      React.createElement("div",{className:"exercise-pills",style:{padding:"0 16px"}},
+        BODY_METRICS.map(m=>React.createElement("button",{key:m.id,
+          className:"pill"+(m.id===metric?" pill-active":""),
+          onClick:()=>setMetric(m.id)},m.label))),
+      React.createElement("div",{className:"card chart-card"},
+        React.createElement("div",{className:"chart-head-row"},
+          React.createElement("div",{className:"chart-title"},metricInfo.label+"の推移 ",
+            React.createElement("span",{className:"chart-unit"},metricInfo.unit?`(${metricInfo.unit})`:"")),
+          React.createElement("div",{className:"period-tabs"},
+            BODY_PERIODS.map(p=>React.createElement("button",{key:p.id,
+              className:"period-tab"+(p.id===period?" active":""),
+              onClick:()=>setPeriod(p.id)},p.label)))),
+        metric==="bmi"&&!(h>0)?
+          React.createElement("p",{className:"body-note",style:{padding:"20px 4px"}},"BMIを表示するには身長を入力してください"):
+        chartData.length===0?
+          React.createElement("p",{className:"body-note",style:{padding:"20px 4px"}},"この期間に"+metricInfo.label+"の記録がありません"):
+          React.createElement(React.Fragment,null,
+            periodDelta&&React.createElement("div",{className:"period-delta"},
+              "期間内の変化: ",
+              React.createElement("span",{className:Math.abs(periodDelta.diff)<0.005?"delta-flat":periodDelta.diff>0?"delta-up":"delta-down"},
+                `${periodDelta.diff>0?"+":""}${periodDelta.diff.toFixed(1)}${metricInfo.unit} (${periodDelta.diff>0?"+":""}${periodDelta.pct.toFixed(1)}%)`)),
+            React.createElement(ResponsiveContainer,{width:"100%",height:220},
+              React.createElement(LineChart,{data:chartData,margin:{top:5,right:16,left:-6,bottom:0}},
+                React.createElement(CartesianGrid,gridStyle),
+                React.createElement(XAxis,{dataKey:"date",tick:tickStyle}),
+                React.createElement(YAxis,{tick:tickStyle,domain:["dataMin - 1","dataMax + 1"],tickFormatter:v=>Number(v).toFixed(1)}),
+                React.createElement(Tooltip,tooltipStyle),
+                React.createElement(Line,{type:"monotone",dataKey:metricInfo.label,stroke:"#e8a020",strokeWidth:2.5,dot:{r:3,fill:"#e8a020"},activeDot:{r:5}}),
+                React.createElement(Line,{type:"monotone",dataKey:"7日平均",stroke:"#4fc3f7",strokeWidth:1.8,strokeDasharray:"6 4",dot:false}))),
+            React.createElement("p",{className:"chart-note"},"点線は直近7日間の平均。日々の水分変動をならした実質的な変化が読み取れます。"))),
+      // 履歴リスト
+      React.createElement("div",{className:"card body-list-card"},
+        React.createElement("div",{className:"card-header",style:{marginBottom:10}},
+          React.createElement("span",{className:"card-icon backup-icon"},"☰"),
+          React.createElement("span",{className:"card-title"},"最近の記録")),
+        recent.map(e=>React.createElement("div",{key:e.date,className:"body-list-row"},
+          React.createElement("span",{className:"blr-date"},fmtMD(e.date)),
+          React.createElement("span",{className:"blr-weight"},e.weight.toFixed(1)+"kg"),
+          React.createElement("span",{className:"blr-sub"},e.fat!=null?e.fat.toFixed(1)+"%":"—"),
+          React.createElement("span",{className:"blr-sub"},e.muscle!=null?e.muscle.toFixed(1)+"kg":"—"),
+          React.createElement("button",{className:"edit-btn",onClick:()=>handleEdit(e)},"✎"),
+          React.createElement("button",{className:"del-btn",onClick:()=>handleDelete(e.date)},"✕"))))));
+}
+
 function App(){
   const [tab,setTab]=useState("record");
   const [workoutData,setWorkoutData]=useState(loadWorkout);
+  const [bodyData,setBodyData]=useState(loadBody);
 
   function refreshWorkout(){setWorkoutData(loadWorkout())}
+  function refreshAll(){setWorkoutData(loadWorkout());setBodyData(loadBody())}
   function handleDeleteWorkout(id){const next=workoutData.filter(r=>r.id!==id);saveWorkout(next);setWorkoutData(next)}
   function handleUpdateWorkout(updated){
     const next=workoutData.map(r=>r.id===updated.id?updated:r);
@@ -428,6 +667,7 @@ function App(){
     {id:"record",  label:"記録",   icon:"✚"},
     {id:"history", label:"履歴",   icon:"📅"},
     {id:"chart",   label:"グラフ", icon:"📈"},
+    {id:"body",    label:"体重",   icon:"⚖️"},
   ];
 
   return React.createElement(React.Fragment,null,
@@ -537,6 +777,42 @@ function App(){
       ::-webkit-scrollbar{width:4px}
       ::-webkit-scrollbar-track{background:transparent}
       ::-webkit-scrollbar-thumb{background:#222;border-radius:2px}
+      /* Body tab */
+      .body-wrap{padding-bottom:8px}
+      .body-summary{padding:18px 20px}
+      .bs-main-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+      .bs-label{font-size:.68rem;color:#a08030;letter-spacing:1px;margin-bottom:4px}
+      .bs-weight{font-family:'Bebas Neue',sans-serif;font-size:2.8rem;color:#f0c040;letter-spacing:1px;line-height:1}
+      .bs-unit{font-size:1rem;color:#a08030;margin-left:4px}
+      .bs-date{font-size:.68rem;color:#666;margin-top:4px}
+      .bs-side{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+      .bs-side-item{display:flex;align-items:baseline;justify-content:flex-end;gap:8px}
+      .bs-side-label{font-size:.62rem;color:#666;letter-spacing:.5px}
+      .bs-side-val{font-family:'Bebas Neue',sans-serif;font-size:1.15rem;color:#ccc;letter-spacing:.5px}
+      .delta-row{display:flex;gap:8px}
+      .delta-chip{flex:1;background:#13132a;border:1px solid #2e2e48;border-radius:10px;padding:9px 12px;display:flex;flex-direction:column;gap:2px}
+      .delta-label{font-size:.62rem;color:#666;letter-spacing:.5px}
+      .delta-val{font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:.5px}
+      .delta-pct{font-size:.72rem;letter-spacing:0}
+      .delta-up{color:#f0a050}
+      .delta-down{color:#4fc3f7}
+      .delta-flat{color:#999}
+      .delta-none{color:#555;font-size:1rem}
+      .body-form-row{display:flex;gap:10px}
+      .body-note{font-size:.68rem;color:#666;margin-top:10px;line-height:1.6}
+      .chart-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+      .chart-head-row .chart-title{margin-bottom:0}
+      .period-tabs{display:flex;background:#181830;border-radius:8px;padding:2px}
+      .period-tab{background:none;border:none;color:#666;padding:5px 10px;font-size:.68rem;font-family:inherit;cursor:pointer;border-radius:6px;transition:all .2s}
+      .period-tab.active{background:#22223a;color:#e8a020;font-weight:700}
+      .period-delta{font-size:.75rem;color:#888;margin-bottom:8px}
+      .period-delta span{font-weight:700}
+      .body-list-card{padding:16px 18px}
+      .body-list-row{display:grid;grid-template-columns:44px 1fr 56px 62px 34px 24px;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid #26263e;font-size:.82rem}
+      .body-list-row:last-child{border-bottom:none}
+      .blr-date{color:#888;font-size:.75rem}
+      .blr-weight{font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:#e8a020;letter-spacing:.5px}
+      .blr-sub{color:#777;font-size:.72rem;text-align:right}
       /* Calendar */
       .cal-header{display:flex;align-items:center;justify-content:space-between;padding:0 16px 14px}
       .cal-month-label{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:2px;color:#eeeef8}
@@ -577,14 +853,16 @@ function App(){
     React.createElement("div",{className:"app"},
       React.createElement("div",{className:"header"},
         React.createElement("span",{className:"header-logo"},"IRON LOG"),
-        React.createElement("span",{className:"header-sub"},"筋トレ記録"),
-        React.createElement("span",{className:"header-count"},workoutData.length+" records")),
+        React.createElement("span",{className:"header-sub"},tab==="body"?"体重管理":"筋トレ記録"),
+        React.createElement("span",{className:"header-count"},
+          tab==="body"?bodyData.length+" days":workoutData.length+" records")),
 
       tab==="record"&&React.createElement(React.Fragment,null,
         React.createElement(RecordForm,{onSave:refreshWorkout}),
-        React.createElement(BackupCard,{onImported:refreshWorkout})),
+        React.createElement(BackupCard,{onImported:refreshAll})),
       tab==="history"&&React.createElement(History,{data:workoutData,onDelete:handleDeleteWorkout,onUpdate:handleUpdateWorkout}),
-      tab==="chart"&&React.createElement(Charts,{data:workoutData})
+      tab==="chart"&&React.createElement(Charts,{data:workoutData}),
+      tab==="body"&&React.createElement(BodyTab,{entries:bodyData,onChange:setBodyData})
     ),
 
     React.createElement("nav",{className:"bottom-nav"},
