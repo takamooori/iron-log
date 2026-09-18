@@ -48,6 +48,28 @@ function loadWorkout(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_WO
 function saveWorkout(d){localStorage.setItem(STORAGE_KEY_WORKOUT,JSON.stringify(d))}
 function loadMeals(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_MEAL)||"[]")}catch{return[]}}
 
+// ─── メニューテンプレート(プッシュ/プル/脚) ───
+const STORAGE_KEY_TEMPLATES = "workout_templates_v1";
+const DEFAULT_TEMPLATES = [
+  {id:1,name:"プッシュ",exercises:["ベンチプレス","インクラインベンチプレス","ショルダープレス","サイドレイズ","トライセプスプレスダウン"]},
+  {id:2,name:"プル",exercises:["デッドリフト","懸垂","ラットプルダウン","シーテッドロウ","バーベルカール"]},
+  {id:3,name:"脚",exercises:["スクワット","レッグプレス","レッグカール","レッグエクステンション","カーフレイズ"]},
+];
+function loadTemplates(){try{const t=JSON.parse(localStorage.getItem(STORAGE_KEY_TEMPLATES)||"null");return Array.isArray(t)&&t.length?t:DEFAULT_TEMPLATES}catch{return DEFAULT_TEMPLATES}}
+function saveTemplates(t){localStorage.setItem(STORAGE_KEY_TEMPLATES,JSON.stringify(t))}
+
+// 指定種目の直近レコード(前回値プリフィル用)
+function lastRecordFor(data,exercise){
+  let last=null;
+  data.forEach(r=>{if(r.exercise===exercise&&(!last||new Date(r.date)>new Date(last.date)))last=r});
+  return last;
+}
+function rowsFromRecord(rec){
+  if(!rec)return[{weight:"",reps:""}];
+  const sets=rec.sets||[{weight:rec.weight,reps:rec.reps}];
+  return sets.map(s=>({weight:String(s.weight),reps:String(s.reps)}));
+}
+
 function formatDate(iso){const d=new Date(iso);return`${d.getMonth()+1}/${d.getDate()}`}
 function formatDateFull(iso){const d=new Date(iso);return`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`}
 
@@ -140,6 +162,13 @@ function stepWeight(cur,delta){
   const next=Math.max(0,base+delta);
   return next===0?"":String(Math.round(next*100)/100);
 }
+const REPS_PRESETS=[8,10,12,15];
+function stepReps(cur,delta){
+  const r=parseInt(cur);
+  const base=isNaN(r)?0:r;
+  const next=Math.max(0,base+delta);
+  return next===0?"":String(next);
+}
 function SetRowEditor({row,index,onChange,onRemove,canRemove}){
   const sub=(parseFloat(row.weight)>0&&parseInt(row.reps)>0)?(parseFloat(row.weight)*parseInt(row.reps)).toFixed(0):"—";
   return React.createElement("div",{className:"set-row2"},
@@ -154,9 +183,14 @@ function SetRowEditor({row,index,onChange,onRemove,canRemove}){
         React.createElement("button",{className:"step-btn step-plus",onClick:()=>onChange({...row,weight:stepWeight(row.weight,5)})},"+5"),
         React.createElement("button",{className:"step-btn step-plus",onClick:()=>onChange({...row,weight:stepWeight(row.weight,10)})},"+10")),
       React.createElement("div",{className:"reps-sub-row"},
+        React.createElement("button",{className:"step-btn",onClick:()=>onChange({...row,reps:stepReps(row.reps,-1)})},"−1"),
         React.createElement("input",{className:"field-input reps-input",type:"number",inputMode:"numeric",min:"1",placeholder:"10",value:row.reps,
           onChange:e=>onChange({...row,reps:e.target.value})}),
         React.createElement("span",{className:"step-unit"},"回"),
+        React.createElement("button",{className:"step-btn step-plus",onClick:()=>onChange({...row,reps:stepReps(row.reps,1)})},"+1"),
+        REPS_PRESETS.map(p=>React.createElement("button",{key:p,
+          className:"rep-chip"+(parseInt(row.reps)===p?" active":""),
+          onClick:()=>onChange({...row,reps:String(p)})},p)),
         React.createElement("span",{className:"set-subtotal"},"小計 "+sub+" kg"))),
     React.createElement("button",{className:"set-del-btn",onClick:onRemove,disabled:!canRemove},"✕"));
 }
@@ -165,6 +199,24 @@ function SetRowEditor({row,index,onChange,onRemove,canRemove}){
 function buildSets(rows){
   const validSets=rows.filter(r=>parseFloat(r.weight)>0&&parseInt(r.reps)>0);
   return validSets.map((r,i)=>({setNum:i+1,weight:parseFloat(r.weight),reps:parseInt(r.reps),total:parseFloat(r.weight)*parseInt(r.reps)}));
+}
+
+// 新規レコードを保存し、PR判定結果を返す(記録フォームとメニュー記録で共用)
+function saveNewRecord(exercise,rows){
+  const sets=buildSets(rows);
+  if(!exercise||sets.length===0)return null;
+  const record={
+    id:Date.now()+Math.floor(Math.random()*1000),
+    date:new Date().toISOString(),exercise,sets,
+    weight:Math.max(...sets.map(s=>s.weight)),
+    total:sets.reduce((s,r)=>s+r.total,0)
+  };
+  const all=loadWorkout();
+  const prevBest=bestE1rmFor(all,exercise,null).value;
+  const thisBest=recordBestE1rm(record).value;
+  const isPR=prevBest>0&&thisBest>prevBest;
+  all.push(record);saveWorkout(all);
+  return{isPR,prevBest,thisBest};
 }
 
 function RecordForm({onSave}){
@@ -176,28 +228,17 @@ function RecordForm({onSave}){
   function removeRow(i){if(rows.length===1)return;setRows(prev=>prev.filter((_,idx)=>idx!==i))}
   const grandTotal=rows.reduce((sum,r)=>{const w=parseFloat(r.weight),rp=parseInt(r.reps);return(w>0&&rp>0)?sum+w*rp:sum},0);
   function handleSave(){
-    if(!exercise)return;
-    const sets=buildSets(rows);
-    if(sets.length===0)return;
-    const record={
-      id:Date.now(),date:new Date().toISOString(),exercise,sets,
-      weight:Math.max(...sets.map(s=>s.weight)),
-      total:sets.reduce((s,r)=>s+r.total,0)
-    };
-    const all=loadWorkout();
-    // PR判定(保存前の過去ベストと比較)
-    const prevBest=bestE1rmFor(all,exercise,null).value;
-    const thisBest=recordBestE1rm(record).value;
-    const isPR=prevBest>0&&thisBest>prevBest;
-    all.push(record);saveWorkout(all);onSave();
-    setSavedMsg(isPR?{pr:true,text:`🎉 e1RM更新！ ${thisBest.toFixed(1)}kg (前回 ${prevBest.toFixed(1)}kg)`}:{pr:false,text:"✓ 保存完了！"});
+    const res=saveNewRecord(exercise,rows);
+    if(!res)return;
+    onSave();
+    setSavedMsg(res.isPR?{pr:true,text:`🎉 e1RM更新！ ${res.thisBest.toFixed(1)}kg (前回 ${res.prevBest.toFixed(1)}kg)`}:{pr:false,text:"✓ 保存完了！"});
     setExercise("");setRows([{weight:"",reps:""}]);
-    setTimeout(()=>setSavedMsg(null),isPR?3500:1800);
+    setTimeout(()=>setSavedMsg(null),res.isPR?3500:1800);
   }
   return React.createElement("div",{className:"card"},
     React.createElement("div",{className:"card-header"},
       React.createElement("span",{className:"card-icon"},"✚"),
-      React.createElement("span",{className:"card-title"},"トレーニング記録")),
+      React.createElement("span",{className:"card-title"},"自由入力で記録")),
     React.createElement("div",{className:"field-group",style:{marginBottom:16}},
       React.createElement("label",{className:"field-label"},"種目"),
       React.createElement(ExerciseInput,{value:exercise,onChange:setExercise})),
@@ -217,13 +258,112 @@ function RecordForm({onSave}){
   );
 }
 
+// ─── メニューから記録(プッシュ/プル/脚テンプレート) ───
+function TemplateExerciseCard({exercise,workoutData,onSaved,savedMsg}){
+  const [open,setOpen]=useState(false);
+  const last=useMemo(()=>lastRecordFor(workoutData,exercise),[]);
+  const [rows,setRows]=useState(()=>rowsFromRecord(last));
+  function updateRow(i,next){setRows(prev=>prev.map((r,idx)=>idx===i?next:r))}
+  function addRow(){const l=rows[rows.length-1]||{weight:"",reps:""};setRows(prev=>[...prev,{weight:l.weight,reps:l.reps}])}
+  function removeRow(i){if(rows.length===1)return;setRows(prev=>prev.filter((_,idx)=>idx!==i))}
+  const lastSummary=last
+    ?"前回 "+(last.sets||[{weight:last.weight,reps:last.reps}]).map(s=>`${s.weight}kg×${s.reps}`).join(" / ")
+    :"記録なし(初挑戦)";
+  function handleSave(){
+    const res=saveNewRecord(exercise,rows);
+    if(!res)return;
+    setOpen(false);
+    onSaved(exercise,res);
+  }
+  return React.createElement("div",{className:"tpl-ex-card"+(savedMsg?" tpl-done":"")},
+    React.createElement("div",{className:"tpl-ex-head",onClick:()=>setOpen(o=>!o)},
+      React.createElement("span",{className:"tpl-ex-arrow"},open?"▾":"▸"),
+      React.createElement("div",{className:"tpl-ex-info"},
+        React.createElement("span",{className:"tpl-ex-name"},exercise),
+        React.createElement("span",{className:"tpl-ex-last"},savedMsg?savedMsg.text:lastSummary))),
+    open&&React.createElement("div",{className:"tpl-ex-body"},
+      rows.map((row,i)=>React.createElement(SetRowEditor,{key:i,row,index:i,
+        onChange:next=>updateRow(i,next),onRemove:()=>removeRow(i),canRemove:rows.length>1})),
+      React.createElement("button",{className:"add-set-btn",onClick:addRow},"＋ セットを追加"),
+      React.createElement("button",{className:"save-btn",onClick:handleSave},"この種目を保存")));
+}
+
+function TemplateEditor({templates,onChange,onClose}){
+  const [addingFor,setAddingFor]=useState(null);
+  const [newEx,setNewEx]=useState("");
+  function update(id,fn){onChange(templates.map(t=>t.id===id?fn(t):t))}
+  function addTemplate(){onChange([...templates,{id:Date.now(),name:"新メニュー",exercises:[]}])}
+  function removeTemplate(id){
+    if(!confirm("このメニューを削除しますか？"))return;
+    onChange(templates.filter(t=>t.id!==id));
+  }
+  function addExercise(id){
+    const name=newEx.trim();
+    if(!name)return;
+    update(id,t=>t.exercises.includes(name)?t:{...t,exercises:[...t.exercises,name]});
+    setNewEx("");
+  }
+  return React.createElement("div",{className:"modal-overlay",onClick:e=>{if(e.target.classList.contains("modal-overlay"))onClose()}},
+    React.createElement("div",{className:"modal-sheet"},
+      React.createElement("div",{className:"modal-handle"}),
+      React.createElement("div",{className:"modal-head"},
+        React.createElement("div",{className:"modal-date"},"メニュー編集"),
+        React.createElement("button",{className:"modal-close",onClick:onClose},"✕")),
+      React.createElement("div",{className:"modal-body"},
+        templates.map(t=>React.createElement("div",{key:t.id,className:"tpl-edit-card"},
+          React.createElement("div",{className:"tpl-edit-head"},
+            React.createElement("input",{className:"field-input tpl-name-input",value:t.name,
+              onChange:e=>update(t.id,x=>({...x,name:e.target.value}))}),
+            React.createElement("button",{className:"edit-btn",onClick:()=>removeTemplate(t.id)},"削除")),
+          t.exercises.map(ex=>React.createElement("div",{key:ex,className:"tpl-edit-ex-row"},
+            React.createElement("span",null,ex),
+            React.createElement("button",{className:"del-btn",onClick:()=>update(t.id,x=>({...x,exercises:x.exercises.filter(e2=>e2!==ex)}))},"✕"))),
+          addingFor===t.id?
+            React.createElement("div",{className:"tpl-add-row"},
+              React.createElement("div",{style:{flex:1}},React.createElement(ExerciseInput,{value:newEx,onChange:setNewEx})),
+              React.createElement("button",{className:"edit-save-btn",style:{flex:"none",padding:"0 16px"},onClick:()=>addExercise(t.id)},"追加")):
+            React.createElement("button",{className:"add-set-btn",style:{margin:"6px 0 0"},onClick:()=>{setAddingFor(t.id);setNewEx("")}},"＋ 種目を追加"))),
+        React.createElement("button",{className:"add-set-btn",onClick:addTemplate},"＋ メニューを追加"))));
+}
+
+function TemplateMenu({workoutData,onSave}){
+  const [templates,setTemplates]=useState(loadTemplates);
+  const [activeId,setActiveId]=useState(null);
+  const [savedMap,setSavedMap]=useState({});
+  const [editorOpen,setEditorOpen]=useState(false);
+  const active=templates.find(t=>t.id===activeId)||null;
+  function handleSaved(exercise,res){
+    setSavedMap(m=>({...m,[exercise]:res.isPR
+      ?{pr:true,text:`🎉 保存済み・e1RM更新！ ${res.thisBest.toFixed(1)}kg`}
+      :{pr:false,text:"✓ 保存済み"}}));
+    onSave();
+  }
+  function selectTemplate(id){setActiveId(cur=>cur===id?null:id);setSavedMap({})}
+  return React.createElement("div",{className:"card"},
+    React.createElement("div",{className:"card-header"},
+      React.createElement("span",{className:"card-icon"},"☰"),
+      React.createElement("span",{className:"card-title"},"メニューから記録"),
+      React.createElement("button",{className:"edit-btn",style:{marginLeft:"auto"},onClick:()=>setEditorOpen(true)},"✎ 編集")),
+    React.createElement("div",{className:"exercise-pills",style:{marginBottom:active?14:0}},
+      templates.map(t=>React.createElement("button",{key:t.id,
+        className:"pill"+(t.id===activeId?" pill-active":""),
+        onClick:()=>selectTemplate(t.id)},t.name))),
+    active&&active.exercises.map(ex=>React.createElement(TemplateExerciseCard,{
+      key:active.id+"-"+ex,exercise:ex,workoutData,onSaved:handleSaved,savedMsg:savedMap[ex]||null})),
+    active&&active.exercises.length===0&&React.createElement("p",{className:"body-note"},"このメニューに種目がありません。「✎ 編集」から追加してください"),
+    !active&&React.createElement("p",{className:"body-note",style:{marginTop:10}},"メニューを選ぶと前回の重量・回数が入った状態で記録できます"),
+    editorOpen&&React.createElement(TemplateEditor,{templates,
+      onChange:t=>{setTemplates(t);saveTemplates(t)},
+      onClose:()=>setEditorOpen(false)}));
+}
+
 // ─── バックアップ(エクスポート/インポート) ───
 function BackupCard({onImported}){
   const fileRef=useRef(null);
   const [msg,setMsg]=useState("");
   function doExport(){
-    const payload={app:"iron-log",version:2,exportedAt:new Date().toISOString(),
-      workout:loadWorkout(),body:loadBody(),bodyProfile:loadBodyProfile(),meal:loadMeals()};
+    const payload={app:"iron-log",version:3,exportedAt:new Date().toISOString(),
+      workout:loadWorkout(),body:loadBody(),bodyProfile:loadBodyProfile(),templates:loadTemplates(),meal:loadMeals()};
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
@@ -255,6 +395,13 @@ function BackupCard({onImported}){
           if(newEntries.length){saveBody([...curBody,...newEntries].sort((a,b)=>a.date<b.date?-1:1));bodyAdded=newEntries.length}
         }
         if(obj.bodyProfile&&obj.bodyProfile.height&&!loadBodyProfile().height)saveBodyProfile(obj.bodyProfile);
+        // メニューテンプレート(名前が重複しないものだけ追加)
+        if(Array.isArray(obj.templates)&&obj.templates.length){
+          const curT=loadTemplates();
+          const names=new Set(curT.map(t=>t.name));
+          const newT=obj.templates.filter(t=>t&&t.name&&Array.isArray(t.exercises)&&!names.has(t.name));
+          if(newT.length)saveTemplates([...curT,...newT]);
+        }
         onImported();
         setMsg(`インポート完了(筋トレ${added.length}件・体重${bodyAdded}件追加 / 重複はスキップ)`);
       }catch(err){setMsg("読み込み失敗: "+err.message)}
@@ -587,7 +734,20 @@ function BodyTab({entries,onChange}){
           React.createElement("input",{className:"field-input weight-input",type:"number",inputMode:"decimal",min:"0",step:"0.1",placeholder:"65.0",value:form.weight,
             onChange:e=>setForm(f=>({...f,weight:e.target.value}))}),
           React.createElement("button",{className:"step-btn step-plus",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,0.1)}))},"+0.1"),
-          React.createElement("button",{className:"step-btn step-plus",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,0.5)}))},"+0.5"))),
+          React.createElement("button",{className:"step-btn step-plus",onClick:()=>setForm(f=>({...f,weight:stepWeight(f.weight,0.5)}))},"+0.5")),
+        latest&&(()=>{
+          const base=latest.weight;
+          const min=Math.round((base-3)*10)/10,max=Math.round((base+3)*10)/10;
+          const w=parseFloat(form.weight);
+          const val=isNaN(w)?base:Math.min(max,Math.max(min,w));
+          return React.createElement(React.Fragment,null,
+            React.createElement("input",{className:"weight-slider",type:"range",min,max,step:0.1,value:val,
+              onChange:e=>setForm(f=>({...f,weight:e.target.value}))}),
+            React.createElement("div",{className:"slider-range-labels"},
+              React.createElement("span",null,min.toFixed(1)),
+              React.createElement("span",null,"前回 "+base.toFixed(1)+"kg"),
+              React.createElement("span",null,max.toFixed(1))));
+        })()),
       React.createElement("div",{className:"body-form-row",style:{marginTop:12}},
         React.createElement("div",{className:"field-group",style:{flex:1}},
           React.createElement("label",{className:"field-label"},"体脂肪率 ",React.createElement("span",{className:"unit"},"% 任意")),
@@ -702,8 +862,11 @@ function App(){
       .step-plus{color:#e8a020}
       .weight-input{flex:1;min-width:52px;text-align:center;padding:9px 4px;font-size:1.05rem;font-weight:700}
       .step-unit{font-size:.68rem;color:#666;flex-shrink:0}
-      .reps-sub-row{display:flex;align-items:center;gap:6px}
-      .reps-input{width:70px;text-align:center;padding:8px 4px}
+      .reps-sub-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+      .reps-input{width:54px;text-align:center;padding:8px 4px}
+      .rep-chip{background:#1a1a30;border:1px solid #32324a;border-radius:8px;color:#888;font-size:.72rem;font-family:inherit;font-weight:700;height:34px;min-width:34px;padding:0 5px;cursor:pointer;flex-shrink:0;touch-action:manipulation;transition:all .15s}
+      .rep-chip:active{background:#e8a020;color:#0d0d14}
+      .rep-chip.active{background:#e8a02022;border-color:#e8a020;color:#e8a020}
       .set-subtotal{margin-left:auto;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:#888;letter-spacing:.5px;white-space:nowrap}
       .set-num{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#e8a020;text-align:center;line-height:38px}
       .set-del-btn{background:none;border:none;color:#3a3a50;cursor:pointer;font-size:.7rem;padding:4px;border-radius:4px;transition:color .2s;line-height:30px}
@@ -718,6 +881,28 @@ function App(){
       .save-btn:hover{background:#f0b030}
       .save-btn.saved{background:#2a7a2a;color:#7fff7f}
       .save-btn.saved-pr{background:#7a5a10;color:#ffd870}
+      /* template menu */
+      .tpl-ex-card{background:#1b1b30;border:1px solid #2e2e48;border-radius:10px;margin-bottom:8px}
+      .tpl-done{border-color:#2a7a2a}
+      .tpl-ex-head{display:flex;align-items:center;gap:8px;padding:11px 12px;cursor:pointer}
+      .tpl-ex-arrow{color:#e8a020;font-size:.8rem;width:14px;flex-shrink:0}
+      .tpl-ex-info{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+      .tpl-ex-name{font-size:.88rem;font-weight:700;color:#ddd}
+      .tpl-ex-last{font-size:.68rem;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .tpl-done .tpl-ex-last{color:#60d080}
+      .tpl-ex-body{padding:4px 12px 12px}
+      /* template editor */
+      .tpl-edit-card{background:#22223a;border:1px solid #2e2e48;border-radius:12px;padding:12px 14px;margin-bottom:10px}
+      .tpl-edit-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+      .tpl-name-input{font-weight:700}
+      .tpl-edit-ex-row{display:flex;align-items:center;justify-content:space-between;padding:7px 2px;border-bottom:1px solid #26263e;font-size:.82rem;color:#aaa}
+      .tpl-edit-ex-row:last-of-type{border-bottom:none}
+      .tpl-add-row{display:flex;gap:8px;margin-top:8px;align-items:stretch}
+      /* weight slider */
+      .weight-slider{width:100%;margin-top:12px;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:#32324a;outline:none}
+      .weight-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;background:#e8a020;cursor:pointer;border:none}
+      .weight-slider::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:#e8a020;cursor:pointer;border:none}
+      .slider-range-labels{display:flex;justify-content:space-between;font-size:.65rem;color:#666;margin-top:4px}
       /* backup */
       .backup-card{padding:16px 18px}
       .backup-icon{background:#2e2e48;color:#aaa}
@@ -858,6 +1043,7 @@ function App(){
           tab==="body"?bodyData.length+" days":workoutData.length+" records")),
 
       tab==="record"&&React.createElement(React.Fragment,null,
+        React.createElement(TemplateMenu,{workoutData,onSave:refreshWorkout}),
         React.createElement(RecordForm,{onSave:refreshWorkout}),
         React.createElement(BackupCard,{onImported:refreshAll})),
       tab==="history"&&React.createElement(History,{data:workoutData,onDelete:handleDeleteWorkout,onUpdate:handleUpdateWorkout}),
