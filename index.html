@@ -32,21 +32,39 @@ const { useState, useEffect, useRef, useMemo } = React;
 const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
 
 // ─── Workout data ───
+// top: よく使う種目(上に表示) / more: その他の種目
 const EXERCISE_CATEGORIES = [
-  {id:"push",label:"プッシュ",exercises:["ベンチプレス","インクラインベンチプレス","ダンベルフライ","ケーブルクロスオーバー",
-    "ショルダープレス","サイドレイズ","フロントレイズ","トライセプスプレスダウン","スカルクラッシャー"]},
-  {id:"pull",label:"プル",exercises:["デッドリフト","懸垂","ラットプルダウン","シーテッドロウ","フェイスプル",
-    "バーベルカール","ハンマーカール"]},
-  {id:"legs",label:"脚",exercises:["スクワット","レッグプレス","レッグカール","レッグエクステンション","ブルガリアンスクワット",
-    "ルーマニアンデッドリフト","ヒップスラスト","カーフレイズ"]},
-  {id:"other",label:"その他",exercises:["プランク","クランチ","レッグレイズ"]},
+  {id:"push",label:"プッシュ",
+    top:["ベンチプレス","ショルダープレス","インクラインベンチプレス","ライイングエクステンション"],
+    more:["ダンベルフライ","ケーブルクロスオーバー","サイドレイズ","フロントレイズ","トライセプスプレスダウン","スカルクラッシャー"]},
+  {id:"pull",label:"プル",
+    top:["懸垂","ベントオーバーローイング","シーテッドローイング","アームカール"],
+    more:["ラットプルダウン","フェイスプル","ハンマーカール"]},
+  {id:"legs",label:"脚",
+    top:["デッドリフト","バーベルスクワット","レッグエクステンション","レッグカール"],
+    more:["レッグプレス","ブルガリアンスクワット","ルーマニアンデッドリフト","ヒップスラスト","カーフレイズ"]},
+  {id:"other",label:"その他",top:["プランク","クランチ","レッグレイズ"],more:[]},
 ];
-const PRESET_EXERCISES = EXERCISE_CATEGORIES.flatMap(c=>c.exercises);
+const PRESET_EXERCISES = EXERCISE_CATEGORIES.flatMap(c=>[...c.top,...c.more]);
+// 旧種目名 → 新種目名(保存済みの記録も読み込み時に統一する)
+const EXERCISE_RENAMES = {"シーテッドロウ":"シーテッドローイング","バーベルカール":"アームカール","スクワット":"バーベルスクワット"};
 
 const STORAGE_KEY_WORKOUT = "workout_log_v2";
 const STORAGE_KEY_MEAL    = "meal_log_v1"; // 旧・食事データ(バックアップ対象として保持)
 
-function loadWorkout(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_WORKOUT)||"[]")}catch{return[]}}
+function loadWorkout(){
+  let data;
+  try{data=JSON.parse(localStorage.getItem(STORAGE_KEY_WORKOUT)||"[]")}catch{return[]}
+  if(!Array.isArray(data))return[];
+  let renamed=false;
+  data=data.map(r=>{
+    const to=r&&EXERCISE_RENAMES[r.exercise];
+    if(!to)return r;
+    renamed=true;return{...r,exercise:to};
+  });
+  if(renamed)saveWorkout(data);
+  return data;
+}
 function saveWorkout(d){localStorage.setItem(STORAGE_KEY_WORKOUT,JSON.stringify(d))}
 function loadMeals(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY_MEAL)||"[]")}catch{return[]}}
 
@@ -138,11 +156,15 @@ function ExerciseInput({value,onChange}){
 // ─── 種目選択(カテゴリタブ＋種目ボタン、キーボード入力も可) ───
 function ExercisePicker({value,onChange}){
   const custom=[...new Set(loadWorkout().map(r=>r.exercise))].filter(e=>!PRESET_EXERCISES.includes(e));
-  const cats=EXERCISE_CATEGORIES.map(c=>c.id==="other"?{...c,exercises:[...c.exercises,...custom]}:c);
-  const [cat,setCat]=useState(()=>{const c=cats.find(c=>c.exercises.includes(value));return c?c.id:"push"});
+  const cats=EXERCISE_CATEGORIES.map(c=>c.id==="other"?{...c,top:[...c.top,...custom]}:c);
+  const [cat,setCat]=useState(()=>{const c=cats.find(c=>c.top.includes(value)||c.more.includes(value));return c?c.id:"push"});
   const [open,setOpen]=useState(!value);
   useEffect(()=>{if(!value)setOpen(true)},[value]);
   const current=cats.find(c=>c.id===cat);
+  const exGrid=list=>React.createElement("div",{className:"ex-grid"},
+    list.map(e=>React.createElement("button",{key:e,
+      className:"ex-btn"+(e===value?" active":""),
+      onClick:()=>{onChange(e);setOpen(false)}},e)));
   if(!open&&value)return React.createElement("button",{className:"picked-ex",onClick:()=>setOpen(true)},
     React.createElement("span",{className:"picked-ex-name"},value),
     React.createElement("span",{className:"picked-ex-change"},"変更"));
@@ -150,10 +172,9 @@ function ExercisePicker({value,onChange}){
     React.createElement("div",{className:"cat-tabs"},
       cats.map(c=>React.createElement("button",{key:c.id,
         className:"cat-tab"+(c.id===cat?" active":""),onClick:()=>setCat(c.id)},c.label))),
-    React.createElement("div",{className:"ex-grid"},
-      current.exercises.map(e=>React.createElement("button",{key:e,
-        className:"ex-btn"+(e===value?" active":""),
-        onClick:()=>{onChange(e);setOpen(false)}},e))),
+    exGrid(current.top),
+    current.more.length>0&&React.createElement("div",{className:"ex-more-label"},"その他の種目"),
+    current.more.length>0&&exGrid(current.more),
     React.createElement("div",{className:"ex-keyboard"},
       React.createElement(ExerciseInput,{value,onChange})),
     value&&React.createElement("button",{className:"ex-close",onClick:()=>setOpen(false)},"閉じる"));
@@ -320,9 +341,11 @@ function BackupCard({onImported}){
 }
 
 // ─── 履歴編集フォーム(モーダル内) ───
-function EditRecordForm({record,onSave,onCancel}){
-  const [exercise,setExercise]=useState(record.exercise);
-  const initRows=(record.sets||[{weight:record.weight,reps:record.reps}]).map(s=>({weight:String(s.weight),reps:String(s.reps)}));
+function EditRecordForm({record,onSave,onCancel,saveLabel}){
+  const [exercise,setExercise]=useState(record?record.exercise:"");
+  const initRows=record
+    ?(record.sets||[{weight:record.weight,reps:record.reps}]).map(s=>({weight:String(s.weight),reps:String(s.reps)}))
+    :[{weight:"",reps:""}];
   const [rows,setRows]=useState(initRows);
   function updateRow(i,next){setRows(prev=>prev.map((r,idx)=>idx===i?next:r))}
   function addRow(){const last=rows[rows.length-1]||{weight:"",reps:""};setRows(prev=>[...prev,{weight:last.weight,reps:last.reps}])}
@@ -347,11 +370,12 @@ function EditRecordForm({record,onSave,onCancel}){
     React.createElement("button",{className:"add-set-btn",onClick:addRow},"＋ セットを追加"),
     React.createElement("div",{className:"edit-btn-row"},
       React.createElement("button",{className:"edit-cancel-btn",onClick:onCancel},"キャンセル"),
-      React.createElement("button",{className:"edit-save-btn",onClick:handleSave},"変更を保存")));
+      React.createElement("button",{className:"edit-save-btn",onClick:handleSave},saveLabel||"変更を保存")));
 }
 
-function DayModal({date,records,onDelete,onUpdate,onClose}){
+function DayModal({date,records,onDelete,onUpdate,onAdd,onClose}){
   const [editingId,setEditingId]=useState(null);
+  const [adding,setAdding]=useState(false);
   const totalVol=records.reduce((s,r)=>s+r.total,0);
   return React.createElement("div",{className:"modal-overlay",onClick:e=>{if(e.target.classList.contains("modal-overlay"))onClose()}},
     React.createElement("div",{className:"modal-sheet"},
@@ -381,10 +405,17 @@ function DayModal({date,records,onDelete,onUpdate,onClose}){
                 React.createElement("span",{className:"hc-set-num"},"Set "+s.setNum),
                 React.createElement("span",{className:"hc-set-detail"},s.weight+"kg × "+s.reps+"回"),
                 React.createElement("span",{className:"hc-set-sub"},s.total.toFixed(0)+" kg")))));
-        }))));
+        }),
+        records.length===0&&!adding&&React.createElement("p",{className:"modal-empty"},"この日の記録はありません"),
+        adding
+          ?React.createElement("div",{className:"history-card editing"},
+            React.createElement(EditRecordForm,{record:null,saveLabel:"この日に追加",
+              onSave:(rec)=>{onAdd(rec);setAdding(false)},
+              onCancel:()=>setAdding(false)}))
+          :editingId===null&&React.createElement("button",{className:"day-add-btn",onClick:()=>setAdding(true)},"＋ この日に記録を追加"))));
 }
 
-function History({data,onDelete,onUpdate}){
+function History({data,onDelete,onUpdate,onAdd}){
   const now=new Date();
   const [year,setYear]=useState(now.getFullYear());
   const [month,setMonth]=useState(now.getMonth());
@@ -413,10 +444,7 @@ function History({data,onDelete,onUpdate}){
   const cells=[];
   for(let i=0;i<firstDay;i++)cells.push(null);
   for(let d=1;d<=daysInMonth;d++)cells.push(d);
-  if(!data.length)return React.createElement("div",{className:"card empty-card"},
-    React.createElement("div",{className:"empty-icon"},"📅"),
-    React.createElement("p",{className:"empty-text"},"まだ記録がありません"),
-    React.createElement("p",{className:"empty-sub"},"記録タブからトレーニングを追加してみよう"));
+  const isFuture=(d)=>new Date(year,month,d)>today;
   return React.createElement("div",{className:"history-wrap"},
     React.createElement("div",{className:"cal-header"},
       React.createElement("button",{className:"cal-nav-btn",onClick:prevMonth},"‹"),
@@ -429,9 +457,10 @@ function History({data,onDelete,onUpdate}){
         const intensity=getIntensity(d);
         const key=getKey(d);
         const active=selected===key;
+        const future=isFuture(d);
         return React.createElement("div",{
-          key:d,className:`cal-cell${intensity>0?" cal-has-rec":""}${isToday(d)?" cal-today":""}${active?" cal-selected":""}`,
-          "data-intensity":intensity,onClick:()=>{if(intensity>0)setSelected(key)}},
+          key:d,className:`cal-cell${intensity>0?" cal-has-rec":""}${future?"":" cal-tappable"}${isToday(d)?" cal-today":""}${active?" cal-selected":""}`,
+          "data-intensity":intensity,onClick:()=>{if(!future)setSelected(key)}},
           React.createElement("span",{className:"cal-day-num"},d),
           intensity>0&&React.createElement("div",{className:`cal-dot cal-dot-${intensity}`}));
       })),
@@ -440,10 +469,14 @@ function History({data,onDelete,onUpdate}){
       [1,2,3].map(i=>React.createElement("div",{key:i,className:"cal-legend-item"},
         React.createElement("div",{className:`cal-dot cal-dot-${i}`}),
         React.createElement("span",null,i===1?"1件":i===2?"2件":"3件+")))),
-    selected&&byDate[selected]&&React.createElement(DayModal,{
-      date:selected,records:byDate[selected],
-      onDelete:(id)=>{onDelete(id);if(!byDate[selected]||byDate[selected].length<=1)setSelected(null)},
-      onUpdate,
+    React.createElement("p",{className:"cal-hint"},"日付をタップすると、その日の記録を追加・編集できます"),
+    selected&&React.createElement(DayModal,{
+      date:selected,records:byDate[selected]||[],
+      onDelete,onUpdate,
+      onAdd:(rec)=>{
+        const [y,m,d]=selected.split("/").map(Number);
+        onAdd({...rec,id:Date.now()+Math.floor(Math.random()*1000),date:new Date(y,m-1,d,12).toISOString()});
+      },
       onClose:()=>setSelected(null)
     })
   );
@@ -715,6 +748,10 @@ function App(){
   function refreshWorkout(){setWorkoutData(loadWorkout())}
   function refreshAll(){setWorkoutData(loadWorkout());setBodyData(loadBody())}
   function handleDeleteWorkout(id){const next=workoutData.filter(r=>r.id!==id);saveWorkout(next);setWorkoutData(next)}
+  function handleAddWorkout(rec){
+    const next=[...loadWorkout(),rec].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    saveWorkout(next);setWorkoutData(next);
+  }
   function handleUpdateWorkout(updated){
     const next=workoutData.map(r=>r.id===updated.id?updated:r);
     saveWorkout(next);setWorkoutData(next);
@@ -774,6 +811,7 @@ function App(){
       .ex-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
       .ex-btn{min-height:52px;background:#1b1b30;border:1px solid #2e2e48;border-radius:10px;color:#ddd;font-size:.88rem;font-family:inherit;text-align:left;padding:8px 12px;cursor:pointer;line-height:1.3;touch-action:manipulation}
       .ex-btn:active,.ex-btn.active{border-color:#e8a020;color:#e8a020;background:#2a2210}
+      .ex-more-label{font-size:.68rem;color:#777;letter-spacing:.5px;margin:12px 0 6px;padding-top:10px;border-top:1px dashed #2e2e48}
       .ex-keyboard{margin-top:10px}
       .ex-close{width:100%;margin-top:8px;height:40px;background:none;border:1px solid #32324a;border-radius:8px;color:#999;font-family:inherit;font-size:.8rem;cursor:pointer}
       .picked-ex{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:56px;background:#2a2210;border:1px solid #e8a020;border-radius:12px;padding:0 16px;cursor:pointer;font-family:inherit}
@@ -898,6 +936,9 @@ function App(){
       .cal-cell{aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:default;transition:all .2s;position:relative;background:#1a1a2a}
       .cal-empty{background:transparent}
       .cal-day-num{font-size:.78rem;color:#666;line-height:1}
+      .cal-tappable{cursor:pointer}
+      .cal-cell:not(.cal-tappable):not(.cal-empty) .cal-day-num{opacity:.35}
+      .cal-tappable:not(.cal-has-rec):hover{background:#22223a}
       .cal-has-rec{cursor:pointer;background:#22223a;border:1px solid #2e2e48}
       .cal-has-rec:hover{border-color:#e8a020;background:#252540}
       .cal-today .cal-day-num{color:#eeeef8;font-weight:700}
@@ -909,6 +950,10 @@ function App(){
       .cal-dot-3{background:#f0c040}
       .cal-legend{display:flex;align-items:center;gap:10px;padding:10px 16px 0;flex-wrap:wrap}
       .cal-legend-label{font-size:.65rem;color:#555;margin-right:2px}
+      .cal-hint{font-size:.68rem;color:#666;padding:10px 16px 0}
+      .day-add-btn{width:100%;min-height:52px;margin-top:4px;background:transparent;border:1px dashed #e8a02088;border-radius:12px;color:#e8a020;font-size:.92rem;font-weight:700;font-family:inherit;cursor:pointer}
+      .day-add-btn:active{background:#2a2210}
+      .modal-empty{font-size:.8rem;color:#777;text-align:center;padding:16px 0 12px}
       .cal-legend-item{display:flex;align-items:center;gap:4px;font-size:.65rem;color:#666}
       /* Modal */
       .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;align-items:flex-end;animation:fadeIn .2s ease}
@@ -935,7 +980,7 @@ function App(){
       tab==="record"&&React.createElement(React.Fragment,null,
         React.createElement(RecordForm,{onSave:refreshWorkout}),
         React.createElement(BackupCard,{onImported:refreshAll})),
-      tab==="history"&&React.createElement(History,{data:workoutData,onDelete:handleDeleteWorkout,onUpdate:handleUpdateWorkout}),
+      tab==="history"&&React.createElement(History,{data:workoutData,onDelete:handleDeleteWorkout,onUpdate:handleUpdateWorkout,onAdd:handleAddWorkout}),
       tab==="chart"&&React.createElement(Charts,{data:workoutData}),
       tab==="body"&&React.createElement(BodyTab,{entries:bodyData,onChange:setBodyData})
     ),
